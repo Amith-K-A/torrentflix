@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #e50914;
+  --color-brand-dark: #b20710;
+  --color-surface: #141414;
+  --color-surface-dim: #0c0c0c;
+  --color-elevated: #1f1f1f;
+  --color-elevated-hover: #2a2a2a;
+  --color-muted: #b3b3b3;
+  --font-sans: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+html,
+body {
+  background: var(--color-surface);
+  color: #fff;
+}
+
+body {
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+/* hide horizontal scrollbars on Netflix-style rows */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* video seek slider */
+input[type="range"].tf-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    var(--color-brand) 0%,
+    var(--color-brand) var(--tf-progress, 0%),
+    rgba(255, 255, 255, 0.6) var(--tf-progress, 0%),
+    rgba(255, 255, 255, 0.6) var(--tf-cached, var(--tf-progress, 0%)),
+    #4d4d4d var(--tf-cached, var(--tf-progress, 0%)),
+    #4d4d4d 100%
+  );
+}
+input[type="range"].tf-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-brand);
+  transition: transform 0.15s ease;
+}
+input[type="range"].tf-seek:hover::-webkit-slider-thumb {
+  transform: scale(1.3);
+}
+input[type="range"].tf-seek::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-brand);
+}
+
+/* video captions */
+video::cue {
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+@keyframes tf-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.tf-fade-in {
+  animation: tf-fade-in 0.4s ease both;
+}
+
+@keyframes tf-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.tf-rise {
+  animation: tf-rise 0.5s ease both;
+}
