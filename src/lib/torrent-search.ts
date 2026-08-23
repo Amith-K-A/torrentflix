@@ -265,19 +265,24 @@ export async function searchTorrents(q: TorrentQuery): Promise<TorrentResult[]> 
     if (q.tmdbId) {
       attempts.push(searchTorrentio("movie", q.tmdbId, null).catch(() => []));
     }
-    if (q.imdbId) {
-      attempts.push(searchTorrentio("movie", undefined, q.imdbId).catch(() => []));
-    }
     attempts.push(searchYts(q.imdbId, q.title, q.year).catch(() => []));
   }
 
-  const needsFallback = q.type === "tv" && !q.tmdbId && !q.imdbId;
-  const [torrentioResults, ytsResults] = await Promise.all(attempts);
+  const results = await Promise.all(attempts);
+  let all = results.flat();
 
-  let all = [...torrentioResults, ...(ytsResults ?? [])];
+  // If we have no seeded results for a movie, fallback to Torrentio IMDB id
+  const hasSeeded = all.some((t) => t.seeds > 0);
+  if (!hasSeeded && q.type === "movie" && q.imdbId) {
+    const imdbFallback = await searchTorrentio("movie", undefined, q.imdbId).catch(() => []);
+    all = [...all, ...imdbFallback];
+  }
+
+  const needsFallback = q.type === "tv" && !q.tmdbId && !q.imdbId;
+  const stillNoSeeded = all.length === 0 || all.every((t) => t.seeds === 0);
 
   // If the primary providers came up empty, scrape 1337x by name.
-  if (all.length === 0 || needsFallback) {
+  if (stillNoSeeded || needsFallback) {
     const query =
       q.type === "tv"
         ? `${q.title} S${String(q.season ?? 1).padStart(2, "0")}E${String(
