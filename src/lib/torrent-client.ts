@@ -26,7 +26,7 @@ export async function getClient(): Promise<AnyClient> {
   if (!globalThis.__wtClient) {
     const mod = await import("webtorrent");
     const WebTorrent = (mod as any).default ?? mod;
-    globalThis.__wtClient = new WebTorrent({ maxConns: 100 });
+    globalThis.__wtClient = new WebTorrent({ maxConns: 300 });
     globalThis.__wtAccess = new Map();
   }
   if (!globalThis.__wtCleanup) {
