@@ -16,7 +16,6 @@ const CATEGORY_TABS = [
   { key: "on_the_air", label: "On Air" },
   { key: "ko", label: "K-Dramas" },
   { key: "th", label: "Thai Dramas" },
-  { key: "18plus", label: "18+" },
 ];
 
 function deduplicate(existing: any[], incoming: any[]) {
@@ -84,8 +83,6 @@ function BrowseInner() {
       apiUrl = `/api/tmdb/discover/${type}?with_original_language=ko&sort_by=popularity.desc&page=${page}`;
     } else if (category === "th") {
       apiUrl = `/api/tmdb/discover/${type}?with_original_language=th&sort_by=popularity.desc&page=${page}`;
-    } else if (category === "18plus") {
-      apiUrl = `/api/tmdb/discover/${type}?include_adult=true&with_genres=10749&sort_by=popularity.desc&page=${page}`; // 10749 is Romance/Erotic in TMDB
     }
 
     fetch(apiUrl, { signal: controller.signal })
