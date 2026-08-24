@@ -1,21 +1,32 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { Suspense } from "react";
+import { useEffect, useRef, useState, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import MediaCard from "@/components/MediaCard";
 import SkeletonCard from "@/components/SkeletonCard";
 import { Loader2 } from "lucide-react";
 
-const CATEGORY_TABS = [
-  { key: "popular", label: "Popular" },
-  { key: "top_rated", label: "Top Rated" },
-  { key: "upcoming", label: "Upcoming" },
-  { key: "now_playing", label: "Now Playing" },
-  { key: "on_the_air", label: "On Air" },
-  { key: "ko", label: "K-Dramas" },
-  { key: "th", label: "Thai Dramas" },
+const LANGUAGES = [
+  { code: "en", name: "English" },
+  { code: "ko", name: "Korean" },
+  { code: "ja", name: "Japanese" },
+  { code: "es", name: "Spanish" },
+  { code: "fr", name: "French" },
+  { code: "de", name: "German" },
+  { code: "th", name: "Thai" },
+  { code: "hi", name: "Hindi" },
+  { code: "zh", name: "Mandarin" },
+  { code: "it", name: "Italian" },
+  { code: "ta", name: "Tamil" },
+  { code: "te", name: "Telugu" },
+  { code: "ml", name: "Malayalam" },
+  { code: "kn", name: "Kannada" },
+];
+
+const SORTS = [
+  { key: "popularity.desc", name: "Suggestion for you" },
+  { key: "primary_release_date.desc", name: "Year Released" },
+  { key: "vote_average.desc", name: "Highest Rated" },
 ];
 
 function deduplicate(existing: any[], incoming: any[]) {
@@ -24,10 +35,14 @@ function deduplicate(existing: any[], incoming: any[]) {
   return [...existing, ...fresh];
 }
 
-function BrowseInner() {
+function LanguagesInner() {
+  const router = useRouter();
+  const pathname = usePathname();
   const sp = useSearchParams();
+  
   const type = sp.get("type") === "tv" ? "tv" : "movie";
-  const category = sp.get("cat") ?? "popular";
+  const lang = sp.get("lang") ?? "en";
+  const sort = sp.get("sort") ?? "primary_release_date.desc";
 
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,27 +51,34 @@ function BrowseInner() {
   const [totalPages, setTotalPages] = useState(1);
 
   const observerTarget = useRef<HTMLDivElement>(null);
-  const prevParamsRef = useRef({ type, category });
+  const prevParamsRef = useRef({ type, lang, sort });
 
-  // Reset state when category or type changes
+  const updateParam = (key: string, value: string) => {
+    const params = new URLSearchParams(sp.toString());
+    params.set(key, value);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  // Reset state when params change
   useEffect(() => {
     if (
       prevParamsRef.current.type !== type ||
-      prevParamsRef.current.category !== category
+      prevParamsRef.current.lang !== lang ||
+      prevParamsRef.current.sort !== sort
     ) {
-      prevParamsRef.current = { type, category };
+      prevParamsRef.current = { type, lang, sort };
       setItems([]);
       setPage(1);
       setTotalPages(1);
     }
-  }, [type, category]);
+  }, [type, lang, sort]);
 
-  // Fetch items for current type, category, and page
+  // Fetch items
   useEffect(() => {
-    // Prevent fetching if params changed but page hasn't reset to 1 yet
     if (
       prevParamsRef.current.type !== type ||
-      prevParamsRef.current.category !== category
+      prevParamsRef.current.lang !== lang ||
+      prevParamsRef.current.sort !== sort
     ) {
       return;
     }
@@ -64,26 +86,23 @@ function BrowseInner() {
     const controller = new AbortController();
     let isMounted = true;
 
-    // upcoming/now_playing are movie-only; on_the_air is tv-only
-    const cat =
-      type === "tv" && (category === "upcoming" || category === "now_playing")
-        ? "popular"
-        : type === "movie" && category === "on_the_air"
-          ? "upcoming"
-          : category;
-
     if (page === 1) {
       setLoading(true);
     } else {
       setLoadingMore(true);
     }
 
-    let apiUrl = `/api/tmdb/${type}/${cat}?page=${page}`;
-    if (category === "ko") {
-      apiUrl = `/api/tmdb/discover/${type}?with_original_language=ko&sort_by=popularity.desc&page=${page}`;
-    } else if (category === "th") {
-      apiUrl = `/api/tmdb/discover/${type}?with_original_language=th&sort_by=popularity.desc&page=${page}`;
+    // Determine extra params for robust sorting
+    let extraParams = "";
+    if (sort === "vote_average.desc") {
+      extraParams = "&vote_count.gte=200"; // filter out weird niche things with 1 vote of 10
+    } else if (sort === "primary_release_date.desc") {
+      // Filter out absolute spam and unreleased future placeholders
+      const today = new Date().toISOString().split("T")[0];
+      extraParams = `&vote_count.gte=5&primary_release_date.lte=${today}`;
     }
+
+    const apiUrl = `/api/tmdb/discover/${type}?with_original_language=${lang}&sort_by=${sort}&page=${page}${extraParams}`;
 
     fetch(apiUrl, { signal: controller.signal })
       .then((r) => r.json())
@@ -107,7 +126,7 @@ function BrowseInner() {
       isMounted = false;
       controller.abort();
     };
-  }, [type, category, page]);
+  }, [type, lang, sort, page]);
 
   // Load next page callback
   const loadMore = useCallback(() => {
@@ -140,41 +159,58 @@ function BrowseInner() {
     };
   }, [loadMore]);
 
-  const tabs = CATEGORY_TABS.filter((t) =>
-    type === "movie"
-      ? t.key !== "on_the_air"
-      : t.key !== "upcoming" && t.key !== "now_playing"
-  );
-
   return (
     <div className="min-h-screen px-4 pb-16 pt-28 md:px-10">
-      <h1 className="text-xl font-bold md:text-2xl">
-        {type === "tv" ? "TV Shows" : "Movies"}
-      </h1>
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <h1 className="text-xl font-bold md:text-2xl">Browse by Languages</h1>
 
-      <div className="mt-4 flex gap-2 overflow-x-auto no-scrollbar">
-        {tabs.map((t) => (
-          <Link
-            key={t.key}
-            href={`/browse?type=${type}&cat=${t.key}`}
-            className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
-              category === t.key
-                ? "bg-white text-black"
-                : "bg-white/10 text-muted hover:bg-white/20 hover:text-white"
-            }`}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-semibold text-muted">Select Your Preference</label>
+            <select
+              value={lang}
+              onChange={(e) => updateParam("lang", e.target.value)}
+              className="rounded bg-white/10 px-3 py-1.5 text-sm text-white outline-none hover:bg-white/20 focus:bg-white/20"
+            >
+              {LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code} className="bg-elevated text-white">
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="h-6 w-[1px] bg-white/20 hidden md:block" />
+
+          <select
+            value={type}
+            onChange={(e) => updateParam("type", e.target.value)}
+            className="rounded bg-white/10 px-3 py-1.5 text-sm text-white outline-none hover:bg-white/20 focus:bg-white/20"
           >
-            {t.label}
-          </Link>
-        ))}
+            <option value="movie" className="bg-elevated text-white">Movies</option>
+            <option value="tv" className="bg-elevated text-white">TV Shows</option>
+          </select>
+
+          <select
+            value={sort}
+            onChange={(e) => updateParam("sort", e.target.value)}
+            className="rounded bg-white/10 px-3 py-1.5 text-sm text-white outline-none hover:bg-white/20 focus:bg-white/20"
+          >
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key} className="bg-elevated text-white">
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 md:gap-4">
+      <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 md:gap-4">
         {loading && page === 1
           ? Array.from({ length: 18 }).map((_, i) => <SkeletonCard key={i} className="w-full" />)
           : items.map((r: any) => (
               <MediaCard
                 key={`${r.media_type ?? type}-${r.id}`}
-                className="w-full"
                 item={{
                   id: r.id,
                   media_type: type,
@@ -187,6 +223,7 @@ function BrowseInner() {
                     (r.release_date || r.first_air_date || "").slice(0, 4) ||
                     null,
                 }}
+                className="w-full"
               />
             ))}
       </div>
@@ -221,14 +258,21 @@ function BrowseInner() {
           You have reached the end of the collection.
         </p>
       )}
+
+      {!loading && items.length === 0 && (
+        <div className="mt-20 text-center text-muted">
+          <p className="text-lg font-semibold">No results found</p>
+          <p className="mt-1 text-sm">Try adjusting your filters.</p>
+        </div>
+      )}
     </div>
   );
 }
 
-export default function BrowsePage() {
+export default function LanguagesPage() {
   return (
     <Suspense fallback={<div className="min-h-screen" />}>
-      <BrowseInner />
+      <LanguagesInner />
     </Suspense>
   );
 }

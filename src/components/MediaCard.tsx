@@ -7,13 +7,13 @@ import { cn, tmdbImg } from "@/lib/utils";
 import type { MediaItem } from "@/lib/types";
 import { useWatchlist } from "@/hooks/useStore";
 
-export default function MediaCard({ item, progress }: { item: MediaItem; progress?: number }) {
+export default function MediaCard({ item, progress, className }: { item: MediaItem; progress?: number; className?: string }) {
   const poster = tmdbImg(item.poster_path, "w300");
   const href = `/watch/${item.id}?type=${item.media_type}`;
   const { has, toggle } = useWatchlist();
 
   return (
-    <div className="group relative w-[130px] shrink-0 transition-transform duration-300 hover:z-10 hover:scale-105 md:w-[170px]">
+    <div className={cn("group relative shrink-0 transition-transform duration-300 hover:z-10 hover:scale-105", className)}>
       <Link href={href} className="block">
         <div className="relative aspect-[2/3] overflow-hidden rounded bg-elevated">
           {poster ? (

@@ -20,12 +20,19 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Search,
   Subtitles,
-  Upload,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
-import { cn, formatTime, playabilityRank, qualityRank, srtToVtt } from "@/lib/utils";
+import {
+  cn,
+  formatTime,
+  playabilityRank,
+  qualityRank,
+  parseSubtitles,
+} from "@/lib/utils";
 import { getProgress, progressKey, saveProgress } from "@/lib/store";
 import type { PlayTarget, TorrentResult } from "@/lib/types";
 
@@ -44,6 +51,7 @@ interface Stats {
   peers: number;
   downloadSpeed: number;
 }
+
 
 export default function PlayerOverlay({
   target,
@@ -73,12 +81,12 @@ export default function PlayerOverlay({
   const [subtitleLabel, setSubtitleLabel] = useState<string | null>(null);
   const [subtitlesLoading, setSubtitlesLoading] = useState(false);
 
-  const fetchSubtitles = useCallback(async () => {
+  const loadSubtitles = useCallback(async (auto: boolean = false) => {
     if (!target.imdbId) return;
     setSubtitlesLoading(true);
     try {
       const cacheKey = `/subtitles/${target.imdbId}/${target.season ?? 0}/${target.episode ?? 0}.vtt`;
-      const cache = await caches.open("subtitles-v1");
+      const cache = await caches.open("subtitles-v4");
       
       let res = await cache.match(cacheKey);
       let vtt = "";
@@ -95,14 +103,15 @@ export default function PlayerOverlay({
         
         const eng = data.subtitles?.filter((s: any) => s.lang === "eng" || s.lang === "en");
         if (!eng || eng.length === 0) {
-          alert("No English subtitles found.");
+          if (!auto) alert("No English subtitles found.");
           setSubtitlesLoading(false);
           return;
         }
         
         const subRes = await fetch(eng[0].url);
         const text = await subRes.text();
-        vtt = eng[0].url.includes(".vtt") ? text : srtToVtt(text);
+        const isSrt = !eng[0].url.includes(".vtt");
+        vtt = parseSubtitles(text, isSrt);
         
         await cache.put(cacheKey, new Response(vtt, { headers: { "Content-Type": "text/vtt" } }));
       }
@@ -110,12 +119,30 @@ export default function PlayerOverlay({
       const blob = new Blob([vtt], { type: "text/vtt" });
       setSubtitleUrl(URL.createObjectURL(blob));
       setSubtitleLabel("English");
+      if (!auto) localStorage.setItem("tf-subtitles", "true");
     } catch (e) {
-      console.error("Failed to fetch subtitles", e);
+      console.error("Failed to load subtitles", e);
     } finally {
       setSubtitlesLoading(false);
     }
   }, [target]);
+
+  const toggleSubtitles = useCallback(() => {
+    if (subtitleUrl) {
+      setSubtitleUrl(null);
+      setSubtitleLabel(null);
+      localStorage.setItem("tf-subtitles", "false");
+    } else {
+      loadSubtitles();
+    }
+  }, [subtitleUrl, loadSubtitles]);
+
+  // Auto-load subtitles if previously enabled
+  useEffect(() => {
+    if (localStorage.getItem("tf-subtitles") === "true") {
+      loadSubtitles(true);
+    }
+  }, [loadSubtitles]);
 
   // autoplay was blocked by the browser and needs a real click to start
   const [needsTap, setNeedsTap] = useState(false);
@@ -316,7 +343,11 @@ export default function PlayerOverlay({
         e.preventDefault();
         togglePlay();
       } else if (e.key === "Escape") {
-        close();
+        if (pickerOpen) {
+          setPickerOpen(false);
+        } else {
+          close();
+        }
       } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && v) {
         v.currentTime += e.key === "ArrowRight" ? 10 : -10;
       } else if (e.key.toLowerCase() === "m" && v) {
@@ -331,7 +362,7 @@ export default function PlayerOverlay({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [close, nudgeControls]);
+  }, [close, nudgeControls, pickerOpen]);
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -405,19 +436,6 @@ export default function PlayerOverlay({
     setCurrent(value);
   }
 
-  function onSubtitleUpload(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result ?? "");
-      const isSrt = /\.srt$/i.test(file.name);
-      const vtt = isSrt ? srtToVtt(text) : text;
-      const url = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
-      setSubtitleUrl(url);
-      setSubtitleLabel(file.name);
-    };
-    reader.readAsText(file);
-  }
-
   const streamUrl = useMemo(
     () =>
       started
@@ -425,6 +443,8 @@ export default function PlayerOverlay({
         : null,
     [started]
   );
+
+
 
   // Kick off playback whenever a new stream mounts (initial start or quality
   // switch) and show the spinner until first data arrives — torrent pieces
@@ -445,18 +465,20 @@ export default function PlayerOverlay({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[100] bg-black tf-fade-in"
-      onMouseMove={handleMouseMove}
+      onMouseMove={nudgeControls}
       onClick={nudgeControls}
+      className="fixed inset-0 z-50 flex select-none items-center justify-center overflow-hidden bg-black"
     >
-      {/* video */}
+      {/* video element */}
       {streamUrl && (
         <video
           ref={videoRef}
+          key={streamUrl}
           src={streamUrl}
-          className="h-full w-full object-contain"
           autoPlay
           playsInline
+          crossOrigin="anonymous"
+          className="h-full w-full object-contain"
           onClick={(e) => {
             e.stopPropagation();
             togglePlay();
@@ -493,6 +515,11 @@ export default function PlayerOverlay({
             if (startPosition > 5 && startPosition < v.duration - 10 && !seekedToStart.current) {
               seekedToStart.current = true;
               v.currentTime = startPosition;
+            }
+            if (v.textTracks && v.textTracks.length > 0) {
+              for (let i = 0; i < v.textTracks.length; i++) {
+                v.textTracks[i].mode = "showing";
+              }
             }
           }}
           onTimeUpdate={(e) => {
@@ -643,14 +670,6 @@ export default function PlayerOverlay({
         </div>
       </div>
 
-      {/* mkv warning */}
-      {started && !started.browserSafe && (
-        <div className="absolute right-4 top-20 rounded bg-yellow-500/90 px-3 py-1.5 text-xs font-semibold text-black">
-          {started.fileName.split(".").pop()?.toUpperCase()} container — if video is blank,
-          your browser can&apos;t decode it. Try another quality.
-        </div>
-      )}
-
       {/* quality picker dropdown */}
       {pickerOpen && (
         <div className="absolute inset-0 z-10 bg-black/80" onClick={() => setPickerOpen(false)}>
@@ -696,7 +715,7 @@ export default function PlayerOverlay({
         </div>
       )}
 
-      {/* bottom controls */}
+      {/* bottom controls */}      {/* bottom controls */}
       <div
         className={cn(
           "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-4 pb-4 pt-16 transition-opacity",
@@ -769,8 +788,8 @@ export default function PlayerOverlay({
 
           <div className="ml-auto flex items-center gap-4 md:ml-0">
             <button
-              onClick={fetchSubtitles}
-              title="Search & Load Subtitles"
+              onClick={toggleSubtitles}
+              title={subtitleUrl ? "Disable Subtitles" : "Search & Load Subtitles"}
               className={cn("hover:text-brand", subtitleUrl ? "text-brand" : "", subtitlesLoading && "animate-pulse")}
             >
               <Subtitles size={22} />

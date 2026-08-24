@@ -40,14 +40,14 @@ export default function MediaRow({
 
   return (
     <section className="group/row relative mt-8">
-      <div className="mb-2 flex items-baseline gap-3 px-4 md:px-10">
+      <div className="mb-2 flex items-center gap-3 px-4 md:px-10">
         <h2 className="text-sm font-semibold text-muted md:text-base">{title}</h2>
         {moreHref && (
           <Link
             href={moreHref}
-            className="translate-x-[-8px] text-xs font-semibold text-brand opacity-0 transition-all group-hover/row:translate-x-0 group-hover/row:opacity-100"
+            className="ml-auto rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white transition hover:bg-white/20"
           >
-            Explore all ›
+            View All
           </Link>
         )}
       </div>
@@ -64,12 +64,12 @@ export default function MediaRow({
         <div
           ref={scroller}
           onScroll={updateArrows}
-          className="flex gap-2.5 overflow-x-auto scroll-smooth px-4 pb-1 no-scrollbar md:gap-3 md:px-10"
+          className="flex gap-2.5 overflow-x-auto scroll-smooth px-4 py-4 -my-3 no-scrollbar md:gap-3 md:px-10"
         >
           {loading
-            ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
+            ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} className="w-[130px] md:w-[170px]" />)
             : items.map((item: any) => (
-                <MediaCard key={item.__key || `${item.media_type}-${item.id}`} item={item} progress={progressFor?.(item)} />
+                <MediaCard key={item.__key || `${item.media_type}-${item.id}`} item={item} progress={progressFor?.(item)} className="w-[130px] md:w-[170px]" />
               ))}
         </div>
         {canScroll.right && (

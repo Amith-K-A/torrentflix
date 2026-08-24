@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/browse?type=movie", label: "Movies" },
   { href: "/browse?type=tv", label: "TV Shows" },
   { href: "/watchlist", label: "My List" },
+  { href: "/languages", label: "Browse by Languages" },
 ];
 
 function NavbarInner() {

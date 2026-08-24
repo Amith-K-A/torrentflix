@@ -20,7 +20,17 @@ function normalize(r: any, type?: "movie" | "tv"): MediaItem {
   };
 }
 
-function Row({ path, title, type }: { path: string; title: string; type?: "movie" | "tv" }) {
+function Row({
+  path,
+  title,
+  type,
+  moreHref,
+}: {
+  path: string;
+  title: string;
+  type?: "movie" | "tv";
+  moreHref?: string;
+}) {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -39,7 +49,14 @@ function Row({ path, title, type }: { path: string; title: string; type?: "movie
     };
   }, [path, type]);
 
-  return <MediaRow title={title} items={items} loading={loading} />;
+  return (
+    <MediaRow
+      title={title}
+      items={items}
+      loading={loading}
+      moreHref={moreHref}
+    />
+  );
 }
 
 interface ContinueItem extends MediaItem {
@@ -114,13 +131,59 @@ export default function HomePage() {
             progressFor={(item) => (item as ContinueItem).__progress}
           />
         )}
-        <Row path="/trending/all/day" title="Trending Now" />
-        <Row path="/movie/now_playing" title="Latest Movies" type="movie" />
-        <Row path="/movie/popular" title="Popular Movies" type="movie" />
-        <Row path="/tv/popular" title="Popular TV Shows" type="tv" />
-        <Row path="/movie/top_rated" title="Top Rated Movies" type="movie" />
-        <Row path="/tv/top_rated" title="Top Rated TV Shows" type="tv" />
-        <Row path="/movie/upcoming" title="Coming Soon" type="movie" />
+        <Row 
+          path="/trending/all/day" 
+          title="Trending Now" 
+          moreHref="/browse?type=movie&cat=popular"
+        />
+        <Row
+          path="/movie/now_playing"
+          title="Latest Movies"
+          type="movie"
+          moreHref="/browse?type=movie&cat=now_playing"
+        />
+        <Row
+          path="/movie/popular"
+          title="Popular Movies"
+          type="movie"
+          moreHref="/browse?type=movie&cat=popular"
+        />
+        <Row
+          path="/tv/popular"
+          title="Popular TV Shows"
+          type="tv"
+          moreHref="/browse?type=tv&cat=popular"
+        />
+        <Row
+          path="/movie/top_rated"
+          title="Top Rated Movies"
+          type="movie"
+          moreHref="/browse?type=movie&cat=top_rated"
+        />
+        <Row
+          path="/tv/top_rated"
+          title="Top Rated TV Shows"
+          type="tv"
+          moreHref="/browse?type=tv&cat=top_rated"
+        />
+        <Row
+          path="/movie/upcoming"
+          title="Coming Soon"
+          type="movie"
+          moreHref="/browse?type=movie&cat=upcoming"
+        />
+        <Row
+          path="/discover/tv?with_original_language=ko&sort_by=popularity.desc"
+          title="Popular K-Dramas"
+          type="tv"
+          moreHref="/browse?type=tv&cat=ko"
+        />
+        <Row
+          path="/discover/tv?with_original_language=th&sort_by=popularity.desc"
+          title="Popular Thai Dramas"
+          type="tv"
+          moreHref="/browse?type=tv&cat=th"
+        />
       </div>
     </div>
   );

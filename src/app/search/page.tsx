@@ -1,40 +1,124 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { SearchX } from "lucide-react";
+import { SearchX, Loader2 } from "lucide-react";
 import MediaCard from "@/components/MediaCard";
 import SkeletonCard from "@/components/SkeletonCard";
+
+function deduplicate(existing: any[], incoming: any[]) {
+  const seen = new Set(existing.map((item) => `${item.media_type}-${item.id}`));
+  const fresh = incoming.filter((item) => !seen.has(`${item.media_type}-${item.id}`));
+  return [...existing, ...fresh];
+}
 
 function SearchInner() {
   const sp = useSearchParams();
   const q = sp.get("q") ?? "";
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+
+  const observerTarget = useRef<HTMLDivElement>(null);
+  const prevQuery = useRef(q);
+
+  // Reset when query changes
+  useEffect(() => {
+    if (prevQuery.current !== q) {
+      prevQuery.current = q;
+      setItems([]);
+      setPage(1);
+      setTotalPages(1);
+    }
+  }, [q]);
 
   useEffect(() => {
     if (!q) {
       setItems([]);
       setLoading(false);
+      setLoadingMore(false);
       return;
     }
-    setLoading(true);
+
+    if (prevQuery.current !== q) {
+      return;
+    }
+
+    if (page === 1) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+
+    const controller = new AbortController();
+    let isMounted = true;
+
     const t = setTimeout(() => {
-      fetch(`/api/tmdb/search/multi?query=${encodeURIComponent(q)}&include_adult=false`)
+      fetch(
+        `/api/tmdb/search/multi?query=${encodeURIComponent(q)}&include_adult=false&page=${page}`,
+        { signal: controller.signal }
+      )
         .then((r) => r.json())
-        .then((data) =>
-          setItems(
-            (data.results ?? []).filter(
-              (x: any) => x.media_type === "movie" || x.media_type === "tv"
-            )
-          )
-        )
-        .catch(() => setItems([]))
-        .finally(() => setLoading(false));
-    }, 250);
-    return () => clearTimeout(t);
-  }, [q]);
+        .then((data) => {
+          if (!isMounted) return;
+          const filtered = (data.results ?? []).filter(
+            (x: any) => x.media_type === "movie" || x.media_type === "tv"
+          );
+          setItems((prev) => (page === 1 ? filtered : deduplicate(prev, filtered)));
+          setTotalPages(Math.min(data.total_pages ?? 1, 50));
+        })
+        .catch((err) => {
+          if (!isMounted || err.name === "AbortError") return;
+          if (page === 1) setItems([]);
+        })
+        .finally(() => {
+          if (isMounted) {
+            setLoading(false);
+            setLoadingMore(false);
+          }
+        });
+    }, page === 1 ? 250 : 0);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(t);
+      controller.abort();
+    };
+  }, [q, page]);
+
+  // Load next page callback
+  const loadMore = useCallback(() => {
+    if (!loading && !loadingMore && page < totalPages) {
+      setPage((prev) => prev + 1);
+    }
+  }, [loading, loadingMore, page, totalPages]);
+
+  // IntersectionObserver for infinite scrolling
+  useEffect(() => {
+    const target = observerTarget.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMore();
+        }
+      },
+      {
+        root: null,
+        rootMargin: "300px",
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+    };
+  }, [loadMore]);
 
   return (
     <div className="min-h-screen px-4 pb-16 pt-28 md:px-10">
@@ -49,7 +133,7 @@ function SearchInner() {
       </h1>
 
       <div className="mt-6 flex flex-wrap gap-3 md:gap-4">
-        {loading
+        {loading && page === 1
           ? Array.from({ length: 12 }).map((_, i) => <SkeletonCard key={i} />)
           : items.map((r: any) => (
               <MediaCard
@@ -62,11 +146,37 @@ function SearchInner() {
                   poster_path: r.poster_path ?? null,
                   backdrop_path: r.backdrop_path ?? null,
                   vote_average: r.vote_average ?? 0,
-                  year: (r.release_date || r.first_air_date || "").slice(0, 4) || null,
+                  year:
+                    (r.release_date || r.first_air_date || "").slice(0, 4) ||
+                    null,
                 }}
               />
             ))}
       </div>
+
+      {/* Skeletons while loading subsequent search pages */}
+      {loadingMore && (
+        <div className="mt-4 flex flex-wrap gap-3 md:gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonCard key={`search-more-${i}`} />
+          ))}
+        </div>
+      )}
+
+      {/* Infinite scroll sentinel */}
+      {page < totalPages && (
+        <div
+          ref={observerTarget}
+          className="mt-8 flex h-16 w-full items-center justify-center"
+        >
+          {loadingMore && (
+            <div className="flex items-center gap-2 text-xs text-muted">
+              <Loader2 className="h-4 w-4 animate-spin text-brand" />
+              <span>Loading more results…</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {!loading && q && items.length === 0 && (
         <div className="mt-24 grid place-items-center gap-3 text-center">
@@ -87,7 +197,15 @@ function SearchInner() {
 export default function SearchPage() {
   return (
     <Suspense
-      fallback={<div className="min-h-screen px-4 pt-28 md:px-10"><div className="flex flex-wrap gap-3">{Array.from({ length: 12 }).map((_, i) => <SkeletonCard key={i} />)}</div></div>}
+      fallback={
+        <div className="min-h-screen px-4 pt-28 md:px-10">
+          <div className="flex flex-wrap gap-3">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+        </div>
+      }
     >
       <SearchInner />
     </Suspense>

@@ -18,9 +18,14 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   const [target, setTarget] = useState<PlayTarget | null>(null);
   const [startPosition, setStartPosition] = useState(0);
   const [showOverview, setShowOverview] = useState<Record<number, boolean>>({});
+  const [mounted, setMounted] = useState(false);
 
   const { has, toggle } = useWatchlist();
   const { isEpisodeWatched, toggleEpisode } = useWatchedEpisodes(details.id);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Auto-restore player on reload
   useEffect(() => {
@@ -143,8 +148,8 @@ export default function WatchView({ details }: { details: MediaDetails }) {
               onClick={() => toggle(mediaItem)}
               className="flex items-center gap-2 rounded bg-white/25 px-6 py-2.5 text-sm font-semibold backdrop-blur transition hover:bg-white/15"
             >
-              {has(mediaItem) ? <Check size={18} /> : <Plus size={18} />}
-              {has(mediaItem) ? "In My List" : "My List"}
+              {mounted && has(mediaItem) ? <Check size={18} /> : <Plus size={18} />}
+              {mounted && has(mediaItem) ? "In My List" : "My List"}
             </button>
           </div>
         </div>

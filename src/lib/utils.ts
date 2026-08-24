@@ -19,13 +19,16 @@ export function tmdbImg(
   return `https://image.tmdb.org/t/p/${size}${path}`;
 }
 
-/** Convert SRT subtitles to WebVTT so the browser <track> element can use them. */
-export function srtToVtt(srt: string): string {
-  const body = srt
-    .replace(/\r+/g, "")
-    .replace(/^\uFEFF/, "")
-    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
-  return `WEBVTT\n\n${body}`;
+/** Convert SRT to WebVTT (if needed) and inject cue position settings */
+export function parseSubtitles(text: string, isSrt: boolean): string {
+  let body = text.replace(/\r+/g, "").replace(/^\uFEFF/, "");
+
+  if (isSrt) {
+    body = body.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+    body = `WEBVTT\n\n${body}`;
+  }
+
+  return body;
 }
 
 export function qualityRank(q: string): number {

@@ -18,7 +18,7 @@ import { buildMagnet } from "./trackers";
  */
 
 const PROXY_URL = process.env.PROXY_URL;
-const TORRENTIO_URL = process.env.TORRENTIO_URL || "https://torrentio.strem.fun";
+const TORRENTIO_URL = process.env.TORRENTIO_URL || "https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,tamilmv,tamilblasters";
 
 const YTS_MIRRORS = [
   "https://yts.mx",
@@ -34,6 +34,10 @@ const X1377X_MIRRORS = [
   "https://x1337x.ws",
   "https://1337x.gd",
   "https://1337x.is",
+];
+
+const NYAA_MIRRORS = [
+  "https://nyaa.si",
 ];
 
 let cachedProxyAgent: HttpsProxyAgent<string> | undefined;
@@ -241,7 +245,50 @@ async function search1377x(query: string): Promise<TorrentResult[]> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Combined                                                           */
+/* Nyaa.si (RSS)                                                      */
+/* ------------------------------------------------------------------ */
+
+async function searchNyaa(query: string): Promise<TorrentResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+  
+  for (const mirror of NYAA_MIRRORS) {
+    try {
+      const xml = await fetchWith(`${mirror}/?page=rss&c=0_0&q=${encodeURIComponent(q)}`, { proxy: true });
+      const $ = cheerio.load(xml, { xmlMode: true });
+      const items = $("item");
+      const results: TorrentResult[] = [];
+      
+      items.each((_, el) => {
+        const title = $(el).find("title").text();
+        const infoHash = $(el).find("nyaa\\:infoHash").text().toLowerCase();
+        const size = $(el).find("nyaa\\:size").text();
+        const seeds = parseInt($(el).find("nyaa\\:seeders").text() || "0", 10);
+        
+        if (infoHash && title) {
+          results.push({
+            id: infoHash,
+            infoHash,
+            magnet: buildMagnet(infoHash, title),
+            name: title,
+            quality: title.match(/(2160p|1080[pi]|720p|480p|4K)/i)?.[1].toLowerCase().replace("i", "p") ?? "unknown",
+            size,
+            seeds,
+            source: "nyaa",
+          });
+        }
+      });
+      
+      return results;
+    } catch {
+      // try next mirror
+    }
+  }
+  return [];
+}
+
+/* ------------------------------------------------------------------ */
+/* CORE SEARCH LOGIC                                                  */
 /* ------------------------------------------------------------------ */
 
 export interface TorrentQuery {
@@ -281,7 +328,7 @@ export async function searchTorrents(q: TorrentQuery): Promise<TorrentResult[]> 
   const needsFallback = q.type === "tv" && !q.tmdbId && !q.imdbId;
   const stillNoSeeded = all.length === 0 || all.every((t) => t.seeds === 0);
 
-  // If the primary providers came up empty, scrape 1337x by name.
+  // If the primary providers came up empty, scrape fallbacks by name.
   if (stillNoSeeded || needsFallback) {
     const query =
       q.type === "tv"
@@ -289,8 +336,17 @@ export async function searchTorrents(q: TorrentQuery): Promise<TorrentResult[]> 
             q.episode ?? 1
           ).padStart(2, "0")}`
         : `${q.title} ${q.year ?? ""}`.trim();
-    const scraped = await search1377x(query).catch(() => []);
-    all = [...all, ...scraped];
+    
+    // Nyaa sometimes uses Ep01 instead of S01E01
+    const altQuery = q.type === "tv" ? `${q.title} ${String(q.episode ?? 1).padStart(2, "0")}` : query;
+
+    const [scraped, nyaa, altNyaa] = await Promise.all([
+      search1377x(query).catch(() => []),
+      searchNyaa(query).catch(() => []),
+      q.type === "tv" ? searchNyaa(altQuery).catch(() => []) : Promise.resolve([])
+    ]);
+    
+    all = [...all, ...scraped, ...nyaa, ...altNyaa];
   }
 
   // de-dupe by infoHash, keep the entry with more seeders
