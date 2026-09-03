@@ -330,13 +330,11 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   // Prevent background page scrolling and scrollbars when player or modal is open
   useEffect(() => {
     if (target || downloadModalTarget) {
-      const origBodyOverflow = document.body.style.overflow;
-      const origHtmlOverflow = document.documentElement.style.overflow;
       document.body.style.overflow = "hidden";
       document.documentElement.style.overflow = "hidden";
       return () => {
-        document.body.style.overflow = origBodyOverflow;
-        document.documentElement.style.overflow = origHtmlOverflow;
+        document.body.style.overflow = "";
+        document.documentElement.style.overflow = "";
       };
     }
   }, [target, downloadModalTarget]);
