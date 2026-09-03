@@ -89,6 +89,40 @@ export default function PlayerOverlay({
   const [subtitleLabel, setSubtitleLabel] = useState<string | null>(null);
   const [subtitlesLoading, setSubtitlesLoading] = useState(false);
   const [showAudioWarning, setShowAudioWarning] = useState(false);
+  const [subtitleOffset, setSubtitleOffset] = useState<number>(0);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMessage(null), 1800);
+  }, []);
+
+  const applySubtitleOffset = useCallback((delta: number) => {
+    setSubtitleOffset((prev) => {
+      const next = Math.round((prev + delta) * 10) / 10;
+      const v = videoRef.current;
+      if (v && v.textTracks && v.textTracks.length > 0) {
+        for (let i = 0; i < v.textTracks.length; i++) {
+          const track = v.textTracks[i];
+          if (track.cues) {
+            for (let j = 0; j < track.cues.length; j++) {
+              const cue = track.cues[j] as VTTCue;
+              cue.startTime += delta;
+              cue.endTime += delta;
+            }
+          }
+        }
+      }
+      showToast(`Subtitle Sync: ${next > 0 ? `+${next.toFixed(1)}` : next.toFixed(1)}s`);
+      return next;
+    });
+  }, [showToast]);
+
+  const resetSubtitleOffset = useCallback(() => {
+    applySubtitleOffset(-subtitleOffset);
+  }, [subtitleOffset, applySubtitleOffset]);
 
   const bufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -436,6 +470,12 @@ export default function PlayerOverlay({
         setMuted(v.muted);
       } else if (e.key.toLowerCase() === "f") {
         toggleFullscreen();
+      } else if ((e.key === "[" || e.key === "{") && subtitleUrl) {
+        applySubtitleOffset(-0.5);
+      } else if ((e.key === "]" || e.key === "}") && subtitleUrl) {
+        applySubtitleOffset(0.5);
+      } else if (e.key === "0" && subtitleUrl && subtitleOffset !== 0) {
+        resetSubtitleOffset();
       }
       nudgeControls();
     };
@@ -443,7 +483,7 @@ export default function PlayerOverlay({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [close, nudgeControls, pickerOpen]);
+  }, [close, nudgeControls, pickerOpen, subtitleUrl, subtitleOffset, applySubtitleOffset, resetSubtitleOffset]);
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -673,10 +713,18 @@ export default function PlayerOverlay({
               src={subtitleUrl}
               srcLang="en"
               label={subtitleLabel ?? "Subtitles"}
-              default
               onLoad={(e) => {
                 const tr = e.currentTarget as HTMLTrackElement;
-                if (tr.track) tr.track.mode = "showing";
+                if (tr.track) {
+                  tr.track.mode = "showing";
+                  if (subtitleOffset !== 0 && tr.track.cues) {
+                    for (let j = 0; j < tr.track.cues.length; j++) {
+                      const cue = tr.track.cues[j] as VTTCue;
+                      cue.startTime += subtitleOffset;
+                      cue.endTime += subtitleOffset;
+                    }
+                  }
+                }
               }}
             />
           )}
@@ -773,6 +821,13 @@ export default function PlayerOverlay({
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Subtitle Sync OSD Toast */}
+      {toastMessage && (
+        <div className="pointer-events-none absolute top-16 left-1/2 -translate-x-1/2 z-50 rounded-full bg-black/85 px-4 py-2 text-sm font-semibold text-white shadow-2xl border border-white/20 backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
+          {toastMessage}
         </div>
       )}
 
@@ -1062,15 +1117,43 @@ export default function PlayerOverlay({
             {label}
           </p>
 
-          <div className="ml-auto flex items-center gap-4 md:ml-0">
+          <div className="ml-auto flex items-center gap-3 md:ml-0">
             <button
               onClick={toggleSubtitles}
               title={subtitleUrl ? "Disable Subtitles" : "Search & Load Subtitles"}
-              className={cn("hover:text-brand", subtitleUrl ? "text-brand" : "", subtitlesLoading && "animate-pulse")}
+              className={cn("hover:text-brand transition cursor-pointer", subtitleUrl ? "text-brand" : "", subtitlesLoading && "animate-pulse")}
             >
               <Subtitles size={22} />
             </button>
-            {subtitleLabel && (
+            {subtitleUrl && (
+              <div className="flex items-center rounded-lg border border-white/20 bg-black/40 px-2 py-0.5 text-xs text-white/90 gap-1.5 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => applySubtitleOffset(-0.5)}
+                  className="px-1 text-white/60 hover:text-brand font-mono font-semibold transition active:scale-95 cursor-pointer"
+                  title="Shift subtitles earlier -0.5s (Hotkey: [ )"
+                >
+                  -0.5s
+                </button>
+                <button
+                  type="button"
+                  onClick={resetSubtitleOffset}
+                  className="font-mono font-bold text-white hover:text-brand px-1 transition cursor-pointer"
+                  title="Click to reset sync to 0.0s (Hotkey: 0)"
+                >
+                  {subtitleOffset > 0 ? `+${subtitleOffset.toFixed(1)}` : subtitleOffset.toFixed(1)}s
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applySubtitleOffset(0.5)}
+                  className="px-1 text-white/60 hover:text-brand font-mono font-semibold transition active:scale-95 cursor-pointer"
+                  title="Shift subtitles later +0.5s (Hotkey: ] )"
+                >
+                  +0.5s
+                </button>
+              </div>
+            )}
+            {subtitleLabel && !subtitleUrl && (
               <span className="max-w-[120px] truncate text-xs text-muted" title={subtitleLabel}>
                 {subtitleLabel}
               </span>
