@@ -25,8 +25,6 @@ import {
   Volume2,
   VolumeX,
   X,
-  Copy,
-  Magnet,
 } from "lucide-react";
 import {
   cn,
@@ -73,27 +71,7 @@ export default function PlayerOverlay({
   const [started, setStarted] = useState<Started | null>(null);
   const [stats, setStats] = useState<Stats>({ progress: 0, peers: 0, downloadSpeed: 0 });
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [copiedSourceId, setCopiedSourceId] = useState<string | null>(null);
 
-  async function handleCopyMagnet(magnet?: string, id?: string) {
-    if (!magnet) return;
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(magnet);
-      } else {
-        const el = document.createElement("textarea");
-        el.value = magnet;
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand("copy");
-        document.body.removeChild(el);
-      }
-      setCopiedSourceId(id || "current");
-      setTimeout(() => setCopiedSourceId(null), 2000);
-    } catch (err) {
-      console.error("Failed to copy magnet:", err);
-    }
-  }
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -224,6 +202,18 @@ export default function PlayerOverlay({
           target.episode
         ).padStart(2, "0")}${target.episodeName ? ` · ${target.episodeName}` : ""}`
       : target.title;
+
+  /* ---------------- lock body scroll while player open ---------------- */
+  useEffect(() => {
+    const origBodyOverflow = document.body.style.overflow;
+    const origHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = origBodyOverflow;
+      document.documentElement.style.overflow = origHtmlOverflow;
+    };
+  }, []);
 
   /* ---------------- source discovery ---------------- */
 
@@ -756,72 +746,114 @@ export default function PlayerOverlay({
         </div>
       </div>
 
-      {/* quality picker dropdown */}
+      {/* quality picker modal */}
       {pickerOpen && (
-        <div className="absolute inset-0 z-10 bg-black/80" onClick={() => setPickerOpen(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+          onClick={() => setPickerOpen(false)}
+        >
           <div
-            className="mx-auto mt-24 w-[min(92vw,540px)] rounded-lg border border-white/10 bg-elevated p-4 tf-rise"
+            className="w-full max-w-2xl lg:max-w-3xl rounded-2xl border border-white/15 bg-surface/95 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] tf-rise"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="font-semibold">Switch source</h3>
-              <button onClick={() => setPickerOpen(false)} className="text-muted hover:text-white">
-                <ChevronDown size={18} />
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4 bg-white/[0.02]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Play className="text-brand" size={20} fill="currentColor" />
+                  <h2 className="text-lg font-bold text-white">Switch Source / Quality</h2>
+                </div>
+                <p className="text-xs text-muted mt-0.5 font-medium">
+                  {target.title}
+                  {target.season && target.episode
+                    ? ` · Season ${target.season}, Episode ${target.episode}${target.episodeName ? ` (${target.episodeName})` : ""}`
+                    : target.year ? ` (${target.year})` : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setPickerOpen(false)}
+                className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-white transition cursor-pointer"
+              >
+                <X size={20} />
               </button>
             </div>
-            <div className="max-h-[50vh] space-y-1 overflow-y-auto">
-              {sources.map((s) => (
-                <div
-                  key={s.id}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-left text-sm hover:bg-elevated-hover transition",
-                    s.id === selected?.id && "bg-elevated-hover"
-                  )}
-                >
-                  <button
-                    onClick={() => {
-                      if (s.id !== selected?.id) {
-                        const v = videoRef.current;
-                        if (v?.duration) persist(v.currentTime, v.duration);
-                        setSelected(s);
-                      }
-                      setPickerOpen(false);
-                    }}
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
-                  >
-                    <span className="w-14 shrink-0 text-xs font-bold text-brand">
-                      {s.quality}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-xs text-white/90">{s.name}</span>
-                    <span className="shrink-0 text-xs text-muted whitespace-nowrap">
-                      {s.size ? `${s.size} · ` : ""}👤 {s.seeds}
-                    </span>
-                    {s.id === selected?.id && <Check size={14} className="shrink-0 text-brand" />}
-                  </button>
 
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    <button
-                      type="button"
-                      onClick={() => handleCopyMagnet(s.magnet, s.id)}
-                      title="Copy magnet URL"
-                      className="p-1.5 rounded hover:bg-white/10 text-muted hover:text-white transition cursor-pointer"
-                    >
-                      {copiedSourceId === s.id ? (
-                        <Check size={14} className="text-emerald-400" />
-                      ) : (
-                        <Copy size={14} />
-                      )}
-                    </button>
-                    <a
-                      href={s.magnet}
-                      title="Download magnet in external client"
-                      className="p-1.5 rounded hover:bg-white/10 text-muted hover:text-brand transition"
-                    >
-                      <Magnet size={14} />
-                    </a>
+            <div className="overflow-y-auto p-4 sm:p-5 space-y-3">
+              {sources.map((s) => {
+                const isSelected = s.id === selected?.id;
+                return (
+                  <div
+                    key={s.id}
+                    className={cn(
+                      "flex flex-col gap-2.5 rounded-xl border p-4 transition",
+                      isSelected
+                        ? "border-brand/40 bg-brand/[0.06] shadow-sm shadow-brand/10"
+                        : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]"
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-md bg-brand/20 px-2.5 py-1 text-xs font-bold text-brand border border-brand/30">
+                          {s.quality}
+                        </span>
+                        {s.source === "yts" && (
+                          <span className="rounded-md bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 border border-emerald-500/25">
+                            Web Optimized
+                          </span>
+                        )}
+                        {s.size && (
+                          <span className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/90">
+                            {s.size}
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border",
+                            s.seeds > 0
+                              ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
+                              : "border-white/10 bg-white/5 text-muted"
+                          )}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                          {s.seeds} seeders
+                        </span>
+                        {s.source && (
+                          <span className="text-[11px] uppercase tracking-wider text-muted/70">
+                            {s.source}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isSelected ? (
+                          <div className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand/40 bg-brand/15 px-3.5 text-xs font-bold text-brand">
+                            <Check size={14} />
+                            <span>Playing Now</span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const v = videoRef.current;
+                              if (v?.duration) persist(v.currentTime, v.duration);
+                              setSelected(s);
+                              setPickerOpen(false);
+                            }}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand px-4 text-xs font-bold text-white shadow-lg shadow-brand/25 transition hover:bg-brand/90 hover:brightness-110 active:scale-95 cursor-pointer whitespace-nowrap"
+                          >
+                            <Play size={13} fill="currentColor" />
+                            <span>Play This</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Torrent File / Release Name: Completely visible without ellipsis or black box */}
+                    <p className="text-xs text-white/75 font-mono break-words leading-relaxed select-all">
+                      {s.name}
+                    </p>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -982,29 +1014,7 @@ export default function PlayerOverlay({
             >
               {selected?.quality?.toUpperCase() ?? "AUTO"}
             </button>
-            {selected?.magnet && (
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => handleCopyMagnet(selected.magnet, "player-current")}
-                  className="hover:text-brand p-1 text-muted transition"
-                  title={copiedSourceId === "player-current" ? "Copied magnet URL!" : "Copy magnet link"}
-                >
-                  {copiedSourceId === "player-current" ? (
-                    <Check size={20} className="text-emerald-400" />
-                  ) : (
-                    <Copy size={20} />
-                  )}
-                </button>
-                <a
-                  href={selected.magnet}
-                  className="hover:text-brand p-1 text-muted transition"
-                  title="Download magnet in external client"
-                >
-                  <Magnet size={20} />
-                </a>
-              </div>
-            )}
+
             <button onClick={toggleFullscreen} aria-label="Fullscreen" className="hover:text-brand">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />

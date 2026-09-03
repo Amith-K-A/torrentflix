@@ -24,8 +24,7 @@ export default function SeasonTabs({
               : "bg-white/10 text-muted hover:bg-white/20 hover:text-white"
           )}
         >
-          {s.name.replace("Season", "S")}
-          <span className="ml-1.5 text-xs opacity-60">{s.episode_count} ep</span>
+          {s.name}
         </button>
       ))}
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CircleHelp, Play, Plus, Star, Download, X, Copy, Magnet, Loader2 } from "lucide-react";
 import { cn, tmdbImg, playabilityRank, qualityRank } from "@/lib/utils";
@@ -58,9 +58,139 @@ export default function WatchView({ details }: { details: MediaDetails }) {
 
   const { has, toggle } = useWatchlist();
   const progresses = useProgressList();
+  const { isEpisodeWatched } = useWatchedEpisodes(details.id);
+
+  const currentEpisodeTarget = useMemo(() => {
+    if (!mounted) {
+      return {
+        season: 1,
+        episode: 1,
+        episodeName: undefined,
+        isResumable: false,
+        label: details.type === "movie" ? "Stream Now" : "Play S1 E1",
+      };
+    }
+
+    if (details.type === "movie") {
+      const movieProgress = progresses.find(
+        (p) => p.type === "movie" && p.tmdbId === details.id
+      );
+      const isResumable =
+        movieProgress &&
+        movieProgress.position > 15 &&
+        movieProgress.position / (movieProgress.duration || 1) < 0.92;
+      return {
+        season: undefined,
+        episode: undefined,
+        episodeName: undefined,
+        isResumable: Boolean(isResumable),
+        label: isResumable ? "Resume" : "Stream Now",
+      };
+    }
+
+    // For TV series:
+    // 1. Check if the user has watch progress on any episode of this show
+    const showProgresses = progresses.filter(
+      (p) => p.type === "tv" && p.tmdbId === details.id
+    );
+    const mostRecent = showProgresses[0]; // progresses is sorted by updatedAt desc
+
+    if (mostRecent && mostRecent.season && mostRecent.episode) {
+      const curSeason = mostRecent.season;
+      const curEpisode = mostRecent.episode;
+      const isPartiallyWatched =
+        mostRecent.position > 15 &&
+        mostRecent.position / (mostRecent.duration || 1) < 0.90;
+
+      // If user is currently in the middle of this episode, resume it!
+      if (isPartiallyWatched) {
+        return {
+          season: curSeason,
+          episode: curEpisode,
+          episodeName: mostRecent.episodeName,
+          isResumable: true,
+          label: `Resume S${curSeason} E${curEpisode}`,
+        };
+      }
+
+      // If most recent episode was completed (>= 90%), find the NEXT episode!
+      const currentSeasonObj = (details.seasons || []).find(
+        (s) => s.season_number === curSeason
+      );
+      if (currentSeasonObj && curEpisode < currentSeasonObj.episode_count) {
+        const nextEp = curEpisode + 1;
+        return {
+          season: curSeason,
+          episode: nextEp,
+          episodeName: undefined,
+          isResumable: false,
+          label: `Play S${curSeason} E${nextEp}`,
+        };
+      }
+
+      // Check if there is a next season
+      const nextSeasonObj = (details.seasons || []).find(
+        (s) => s.season_number === curSeason + 1
+      );
+      if (nextSeasonObj && nextSeasonObj.episode_count > 0) {
+        return {
+          season: curSeason + 1,
+          episode: 1,
+          episodeName: undefined,
+          isResumable: false,
+          label: `Play S${curSeason + 1} E1`,
+        };
+      }
+    }
+
+    // 2. Fallback: Check sequentially for the first unwatched episode
+    const validSeasons = (details.seasons || [])
+      .filter((s) => s.season_number > 0)
+      .sort((a, b) => a.season_number - b.season_number);
+
+    for (const s of validSeasons) {
+      for (let epNum = 1; epNum <= (s.episode_count || 1); epNum++) {
+        const p = progresses.find(
+          (prog) =>
+            prog.type === "tv" &&
+            prog.tmdbId === details.id &&
+            prog.season === s.season_number &&
+            prog.episode === epNum
+        );
+        const isEpWatched =
+          isEpisodeWatched(s.season_number, epNum) ||
+          (p && (p.position / (p.duration || 1)) >= 0.90);
+
+        if (!isEpWatched) {
+          const isPartiallyWatched =
+            p && p.position > 15 && (p.position / (p.duration || 1)) < 0.90;
+          return {
+            season: s.season_number,
+            episode: epNum,
+            episodeName: p?.episodeName,
+            isResumable: Boolean(isPartiallyWatched),
+            label: isPartiallyWatched
+              ? `Resume S${s.season_number} E${epNum}`
+              : `Play S${s.season_number} E${epNum}`,
+          };
+        }
+      }
+    }
+
+    // Default fallback
+    return {
+      season: 1,
+      episode: 1,
+      episodeName: undefined,
+      isResumable: false,
+      label: "Play S1 E1",
+    };
+  }, [details, progresses, isEpisodeWatched, mounted]);
+
   const router = useRouter();
   const [downloadingTarget, setDownloadingTarget] = useState<string | null>(null);
   const [downloadModalTarget, setDownloadModalTarget] = useState<PlayTarget | null>(null);
+  const [downloadModalMode, setDownloadModalMode] = useState<"download" | "magnet">("download");
   const [downloadSources, setDownloadSources] = useState<TorrentResult[] | null>(null);
   const [activeDownloads, setActiveDownloads] = useState<any[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -140,14 +270,43 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   async function handleQuickDownloadMagnet(t: PlayTarget, actionId: string) {
     setQuickLoading(actionId);
     try {
-      const best = await fetchBestTorrent(t);
-      if (!best?.magnet) {
-        alert("No magnet link found for this title.");
-        return;
+      const key = t.type === "tv" ? `S${t.season}E${t.episode}` : "movie";
+      let sorted = sourcesCache[key];
+      if (!sorted || sorted.length === 0) {
+        const params = new URLSearchParams({
+          type: t.type,
+          title: t.title,
+          tmdbId: String(t.tmdbId),
+        });
+        if (t.imdbId) params.set("imdbId", t.imdbId);
+        if (t.year) params.set("year", t.year);
+        if (t.season) params.set("season", String(t.season));
+        if (t.episode) params.set("episode", String(t.episode));
+
+        const res = await fetch(`/api/torrents?${params}`);
+        const data = await res.json();
+        const results: TorrentResult[] = data.results ?? [];
+        if (!results.length) {
+          alert("No sources found for this title.");
+          return;
+        }
+
+        sorted = [...results].sort(
+          (a, b) =>
+            Number(b.seeds > 0) - Number(a.seeds > 0) ||
+            Number(b.source === "yts") - Number(a.source === "yts") ||
+            playabilityRank(a.name) - playabilityRank(b.name) ||
+            b.seeds - a.seeds ||
+            Math.abs(qualityRank(b.quality) - 3) - Math.abs(qualityRank(a.quality) - 3)
+        );
+        sourcesCache[key] = sorted;
       }
-      window.location.href = best.magnet;
+
+      setDownloadSources(sorted);
+      setDownloadModalMode("magnet");
+      setDownloadModalTarget(t);
     } catch (err) {
-      alert("Failed to open magnet link.");
+      alert("Failed to fetch sources.");
     } finally {
       setQuickLoading(null);
     }
@@ -176,6 +335,20 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Prevent background page scrolling and scrollbars when player or modal is open
+  useEffect(() => {
+    if (target || downloadModalTarget) {
+      const origBodyOverflow = document.body.style.overflow;
+      const origHtmlOverflow = document.documentElement.style.overflow;
+      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = origBodyOverflow;
+        document.documentElement.style.overflow = origHtmlOverflow;
+      };
+    }
+  }, [target, downloadModalTarget]);
 
   // Auto-restore player on reload
   useEffect(() => {
@@ -234,9 +407,15 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   }
 
   async function openDownloadModal(t: PlayTarget) {
+    setDownloadModalMode("download");
     const key = t.type === "tv" ? `S${t.season}E${t.episode}` : "movie";
     setDownloadingTarget(key);
     try {
+      if (sourcesCache[key] && sourcesCache[key].length > 0) {
+        setDownloadSources(sourcesCache[key]);
+        setDownloadModalTarget(t);
+        return;
+      }
       const params = new URLSearchParams({
         type: t.type,
         title: t.title,
@@ -365,13 +544,19 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                   title: details.title,
                   year: details.year,
                   posterPath: details.poster_path,
-                  ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
+                  ...(details.type === "tv"
+                    ? {
+                        season: currentEpisodeTarget.season,
+                        episode: currentEpisodeTarget.episode,
+                        episodeName: currentEpisodeTarget.episodeName,
+                      }
+                    : {}),
                 })
               }
               className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-white px-6 text-sm font-bold text-black shadow-md transition hover:bg-white/90 active:scale-95 whitespace-nowrap cursor-pointer"
             >
               <Play size={18} fill="currentColor" />
-              <span>{details.type === "movie" ? "Stream Now" : "Play S1 E1"}</span>
+              <span>{currentEpisodeTarget.label}</span>
             </button>
             {(() => {
               if (details.type === "movie") {
@@ -400,14 +585,22 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                       title: details.title,
                       year: details.year,
                       posterPath: details.poster_path,
-                      ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
+                      ...(details.type === "tv"
+                        ? {
+                            season: currentEpisodeTarget.season,
+                            episode: currentEpisodeTarget.episode,
+                            episodeName: currentEpisodeTarget.episodeName,
+                          }
+                        : {}),
                     })
                   }
                   disabled={downloadingTarget !== null}
                   className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-white active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
                 >
                   <Download size={18} />
-                  <span>{downloadingTarget === (details.type === "tv" ? "S1E1" : "movie") ? "Starting..." : "Download"}</span>
+                  <span>
+                    {downloadingTarget === (details.type === "tv" ? `S${currentEpisodeTarget.season}E${currentEpisodeTarget.episode}` : "movie") ? "Starting..." : "Download"}
+                  </span>
                 </button>
               );
             })()}
@@ -423,7 +616,13 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                     title: details.title,
                     year: details.year,
                     posterPath: details.poster_path,
-                    ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
+                    ...(details.type === "tv"
+                      ? {
+                          season: currentEpisodeTarget.season,
+                          episode: currentEpisodeTarget.episode,
+                          episodeName: currentEpisodeTarget.episodeName,
+                        }
+                      : {}),
                   },
                   "hero-copy"
                 )
@@ -461,19 +660,25 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                     title: details.title,
                     year: details.year,
                     posterPath: details.poster_path,
-                    ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
+                    ...(details.type === "tv"
+                      ? {
+                          season: currentEpisodeTarget.season,
+                          episode: currentEpisodeTarget.episode,
+                          episodeName: currentEpisodeTarget.episodeName,
+                        }
+                      : {}),
                   },
                   "hero-download"
                 )
               }
               disabled={quickLoading !== null}
-              title="Open magnet link in external BitTorrent app (qBittorrent, etc.)"
+              title="Select and download magnet link in external BitTorrent app"
               className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-brand active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
             >
               {quickLoading === "hero-download" ? (
                 <>
                   <Loader2 size={18} className="animate-spin text-brand" />
-                  <span>Opening...</span>
+                  <span>Fetching...</span>
                 </>
               ) : (
                 <>
@@ -662,7 +867,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                                 )
                               }
                               disabled={quickLoading !== null}
-                              title="Open / Download magnet in external BitTorrent client"
+                              title="Select and download magnet link for this episode"
                               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5 text-muted transition hover:border-brand hover:text-brand hover:bg-white/10 disabled:opacity-50 cursor-pointer"
                             >
                               {quickLoading === `ep-${ep.episode_number}-download` ? (
@@ -739,84 +944,128 @@ export default function WatchView({ details }: { details: MediaDetails }) {
 
       {/* Download Selection Modal */}
       {downloadModalTarget && downloadSources && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setDownloadModalTarget(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4" onClick={() => setDownloadModalTarget(null)}>
           <div 
-            className="w-full max-w-lg rounded-xl border border-white/10 bg-elevated shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+            className="w-full max-w-2xl lg:max-w-3xl rounded-2xl border border-white/15 bg-surface/95 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/10 p-4 bg-elevated">
-              <h2 className="text-lg font-bold">Select File to Download</h2>
-              <button onClick={() => setDownloadModalTarget(null)} className="text-muted hover:text-white transition">
+            <div className="flex items-center justify-between border-b border-white/10 px-6 py-4 bg-white/[0.02]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Magnet className="text-brand" size={20} />
+                  <h2 className="text-lg font-bold text-white">
+                    {downloadModalMode === "magnet" ? "Select Torrent to Download Magnet" : "Select File to Download"}
+                  </h2>
+                </div>
+                <p className="text-xs text-muted mt-0.5 font-medium">
+                  {downloadModalTarget.title}
+                  {downloadModalTarget.season && downloadModalTarget.episode
+                    ? ` · Season ${downloadModalTarget.season}, Episode ${downloadModalTarget.episode}${downloadModalTarget.episodeName ? ` (${downloadModalTarget.episodeName})` : ""}`
+                    : downloadModalTarget.year ? ` (${downloadModalTarget.year})` : ""}
+                </p>
+              </div>
+              <button 
+                onClick={() => setDownloadModalTarget(null)} 
+                className="rounded-lg p-1.5 text-muted hover:bg-white/10 hover:text-white transition cursor-pointer"
+              >
                 <X size={20} />
               </button>
             </div>
-            <div className="overflow-y-auto p-3 space-y-2">
+            
+            <div className="overflow-y-auto p-4 sm:p-5 space-y-3">
               {downloadSources.map((s) => (
                 <div
                   key={s.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/[0.03] p-3 transition hover:border-white/10 hover:bg-white/[0.06]"
+                  className="flex flex-col gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-white/20 hover:bg-white/[0.06]"
                 >
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-brand/20 px-2 py-0.5 text-xs font-bold text-brand">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md bg-brand/20 px-2.5 py-1 text-xs font-bold text-brand border border-brand/30">
                         {s.quality}
                       </span>
                       {s.source === "yts" && (
-                        <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">
+                        <span className="rounded-md bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 border border-emerald-500/25">
                           Web Optimized
                         </span>
                       )}
-                      <span className="text-xs text-muted">
-                        {s.size ? `${s.size} · ` : ""}👤 {s.seeds} seeders
+                      {s.size && (
+                        <span className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/90">
+                          {s.size}
+                        </span>
+                      )}
+                      <span className={cn(
+                        "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border",
+                        s.seeds > 0
+                          ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
+                          : "border-white/10 bg-white/5 text-muted"
+                      )}>
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                        {s.seeds} seeders
                       </span>
                     </div>
-                    <span className="truncate text-xs font-medium text-white/90" title={s.name}>
-                      {s.name}
-                    </span>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* Copy Magnet URL */}
+                      <button
+                        type="button"
+                        onClick={() => handleCopyMagnet(s.magnet, s.id)}
+                        title="Copy magnet link to clipboard"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-medium text-white/80 transition hover:border-white/30 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95"
+                      >
+                        {copiedId === s.id ? (
+                          <>
+                            <Check size={14} className="text-emerald-400" />
+                            <span className="text-emerald-400 font-semibold">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} />
+                            <span>Copy</span>
+                          </>
+                        )}
+                      </button>
+
+                      {/* Download Magnet Link: Real anchor tag so browser / OS protocol handler receives it reliably */}
+                      <a
+                        href={s.magnet}
+                        onClick={() => {
+                          handleCopyMagnet(s.magnet, s.id);
+                          setTimeout(() => setDownloadModalTarget(null), 1500);
+                        }}
+                        title="Open magnet in external BitTorrent app (qBittorrent, etc.)"
+                        className={cn(
+                          "inline-flex h-9 items-center gap-1.5 rounded-lg px-4 text-xs font-bold transition cursor-pointer active:scale-95 whitespace-nowrap",
+                          downloadModalMode === "magnet"
+                            ? "bg-brand text-white shadow-lg shadow-brand/25 hover:bg-brand/90 hover:brightness-110"
+                            : "border border-white/15 bg-white/5 text-white/90 hover:border-white/30 hover:bg-white/10 hover:text-white"
+                        )}
+                      >
+                        <Magnet size={14} className={downloadModalMode === "magnet" ? "text-white" : "text-brand"} />
+                        <span>{downloadModalMode === "magnet" ? "Download Magnet" : "Magnet"}</span>
+                      </a>
+
+                      {/* In-app download to ~/Downloads/TorrentFlix */}
+                      <button
+                        type="button"
+                        onClick={() => confirmDownload(downloadModalTarget, s)}
+                        title="Download within TorrentFlix"
+                        className={cn(
+                          "inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-bold transition cursor-pointer active:scale-95 whitespace-nowrap",
+                          downloadModalMode === "download"
+                            ? "bg-brand text-white shadow-lg shadow-brand/25 hover:bg-brand/90 hover:brightness-110"
+                            : "border border-white/15 bg-white/5 text-white/80 hover:border-white/30 hover:bg-white/10 hover:text-white"
+                        )}
+                      >
+                        <Download size={14} />
+                        <span>{downloadModalMode === "magnet" ? "In-App" : "Download"}</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-2">
-                    {/* Copy Magnet URL */}
-                    <button
-                      type="button"
-                      onClick={() => handleCopyMagnet(s.magnet, s.id)}
-                      title="Copy magnet link to clipboard"
-                      className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white cursor-pointer"
-                    >
-                      {copiedId === s.id ? (
-                        <>
-                          <Check size={13} className="text-emerald-400" />
-                          <span className="text-emerald-400 font-semibold">Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={13} />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </button>
-
-                    {/* Open / Download Magnet in default BitTorrent app */}
-                    <a
-                      href={s.magnet}
-                      title="Download magnet in external BitTorrent app (qBittorrent, etc.)"
-                      className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-                    >
-                      <Magnet size={13} className="text-brand" />
-                      <span>Magnet</span>
-                    </a>
-
-                    {/* In-app download to ~/Downloads/TorrentFlix */}
-                    <button
-                      type="button"
-                      onClick={() => confirmDownload(downloadModalTarget, s)}
-                      title="Download within TorrentFlix"
-                      className="flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-bold text-white shadow transition hover:bg-brand/90 active:scale-95 cursor-pointer"
-                    >
-                      <Download size={13} />
-                      <span>Download</span>
-                    </button>
-                  </div>
+                  {/* Torrent File / Release Name: Full name completely visible without ellipsis or background */}
+                  <p className="text-xs text-white/75 font-mono break-words leading-relaxed select-all">
+                    {s.name}
+                  </p>
                 </div>
               ))}
             </div>

@@ -23,10 +23,23 @@ export function tmdbImg(
 export function parseSubtitles(text: string, isSrt: boolean): string {
   let body = text.replace(/\r+/g, "").replace(/^\uFEFF/, "");
 
-  if (isSrt) {
-    body = body.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  // Normalize SRT timestamp commas to WebVTT periods
+  body = body.replace(/(\d{1,2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+
+  if (!body.startsWith("WEBVTT")) {
     body = `WEBVTT\n\n${body}`;
   }
+
+  // Inject positioning to lift subtitles up from the bottom edge (avoiding overlap with bottom control bar)
+  body = body.replace(
+    /(\d{1,2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{1,2}:\d{2}:\d{2}\.\d{3})(.*)/g,
+    (match, times, existingSettings) => {
+      if (/line:/.test(existingSettings)) {
+        return match;
+      }
+      return `${times} line:84% position:50% align:center`;
+    }
+  );
 
   return body;
 }

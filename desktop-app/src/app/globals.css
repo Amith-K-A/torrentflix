@@ -70,15 +70,15 @@ input[type="range"].tf-seek::-moz-range-thumb {
 
 /* video captions */
 video::cue {
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.82);
   color: #ffffff;
   font-family: var(--font-sans);
-  font-size: 1.15rem;
-  font-weight: 600;
-  line-height: 1.4;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-size: clamp(1.3rem, 2.4vw, 1.8rem);
+  font-weight: 700;
+  line-height: 1.45;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95);
+  padding: 4px 14px;
+  border-radius: 6px;
 }
 
 @keyframes tf-fade-in {
