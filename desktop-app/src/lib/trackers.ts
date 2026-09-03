@@ -3,11 +3,9 @@
  * Includes WebRTC (wss://) trackers so browser peers can find the swarm too.
  */
 export const TRACKERS: string[] = [
-  // WebRTC trackers (browser peers)
   "wss://tracker.openwebtorrent.com",
   "wss://tracker.btorrent.xyz",
   "wss://tracker.webtorrent.dev",
-  // UDP trackers (fastest for Node.js)
   "udp://tracker.opentrackr.org:1337/announce",
   "udp://open.demonii.com:1337/announce",
   "udp://open.stealth.si:80/announce",
@@ -20,16 +18,6 @@ export const TRACKERS: string[] = [
   "udp://tracker.dler.org:6969/announce",
   "udp://opentracker.io:6969/announce",
   "udp://tracker.openbittorrent.com:6969/announce",
-  "udp://tracker.tiny-vps.com:6969/announce",
-  "udp://tracker.pomf.se:80/announce",
-  "udp://p4p.arenabg.com:1337/announce",
-  "udp://movies.zsw.ca:6969/announce",
-  "udp://retracker.lanta-net.ru:2710/announce",
-  // HTTP trackers (fallback when UDP is blocked)
-  "http://tracker.opentrackr.org:1337/announce",
-  "http://tracker.openbittorrent.com:80/announce",
-  "https://tracker.nanoha.org:443/announce",
-  "https://tracker.loligirl.cn:443/announce",
 ];
 
 export function buildMagnet(infoHash: string, name: string): string {

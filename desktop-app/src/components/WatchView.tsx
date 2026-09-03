@@ -7,45 +7,10 @@ import { Check, CircleHelp, Play, Plus, Star, Download, X } from "lucide-react";
 import { cn, tmdbImg, playabilityRank, qualityRank } from "@/lib/utils";
 import type { EpisodeItem, MediaItem, PlayTarget, TorrentResult } from "@/lib/types";
 import type { MediaDetails } from "@/lib/tmdb";
-import { useWatchedEpisodes, useWatchlist, useProgressList } from "@/hooks/useStore";
+import { useWatchedEpisodes, useWatchlist } from "@/hooks/useStore";
 import { getProgress, progressKey } from "@/lib/store";
 import PlayerOverlay from "./PlayerOverlay";
 import SeasonTabs from "./SeasonTabs";
-
-const CircularProgress = ({ progress }: { progress: number }) => {
-  const radius = 12;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (progress * circumference);
-  
-  return (
-    <div title={`Downloading ${Math.round(progress * 100)}%`} className="relative flex items-center justify-center shrink-0 min-w-[28px] h-[28px]">
-      <svg className="absolute inset-0 w-full h-full -rotate-90">
-        <circle
-          cx="14"
-          cy="14"
-          r={radius}
-          className="stroke-gray-700"
-          strokeWidth="2.5"
-          fill="none"
-        />
-        <circle
-          cx="14"
-          cy="14"
-          r={radius}
-          className="stroke-red-500 transition-all duration-300 ease-out"
-          strokeWidth="2.5"
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          fill="none"
-          strokeLinecap="round"
-        />
-      </svg>
-      <span className="text-[9px] font-bold tracking-tighter text-white relative z-10">
-        {Math.round(progress * 100)}%
-      </span>
-    </div>
-  );
-};
 
 export default function WatchView({ details }: { details: MediaDetails }) {
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
@@ -57,32 +22,11 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   const [mounted, setMounted] = useState(false);
 
   const { has, toggle } = useWatchlist();
-  const progresses = useProgressList();
+  const { isEpisodeWatched, toggleEpisode } = useWatchedEpisodes(details.id);
   const router = useRouter();
   const [downloadingTarget, setDownloadingTarget] = useState<string | null>(null);
   const [downloadModalTarget, setDownloadModalTarget] = useState<PlayTarget | null>(null);
   const [downloadSources, setDownloadSources] = useState<TorrentResult[] | null>(null);
-  const [activeDownloads, setActiveDownloads] = useState<any[]>([]);
-
-  useEffect(() => {
-    let mounted = true;
-    const fetchDownloads = () => {
-      fetch("/api/downloads")
-        .then((r) => r.json())
-        .then((data) => {
-          if (mounted) setActiveDownloads(data);
-        })
-        .catch(() => {});
-    };
-    
-    fetchDownloads();
-    const interval = setInterval(fetchDownloads, 2000);
-    
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
-  }, []);
 
   useEffect(() => {
     setMounted(true);
@@ -194,31 +138,19 @@ export default function WatchView({ details }: { details: MediaDetails }) {
     setDownloadModalTarget(null);
 
     try {
-      const res = await fetch("/api/downloads/add", {
+      await fetch("/api/downloads/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           magnet: source.magnet,
           title: label,
           posterPath: t.posterPath,
-          fileIdx: source.fileIdx,
-          type: t.type,
-          tmdbId: t.tmdbId,
-          imdbId: t.imdbId,
-          season: t.season,
-          episode: t.episode,
-          episodeName: t.episodeName,
         }),
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to start download");
-      }
-
       router.push("/downloads");
-    } catch (err: any) {
-      alert(err.message || "Failed to start download.");
+    } catch (err) {
+      alert("Failed to start download.");
     }
   }
 
@@ -283,40 +215,24 @@ export default function WatchView({ details }: { details: MediaDetails }) {
               <Play size={18} fill="currentColor" />
               {details.type === "movie" ? "Stream Now" : "Play S1 E1"}
             </button>
-            {(() => {
-              if (details.type === "movie") {
-                const md = activeDownloads.find(d => d.type === "movie" && d.tmdbId === details.id);
-                if (md?.done || (md && md.progress >= 1)) {
-                  return (
-                    <div className="flex items-center gap-2 rounded bg-emerald-500/20 px-6 py-2.5 text-sm font-bold text-emerald-400 border border-emerald-500/30">
-                      <Check size={18} />
-                      Downloaded
-                    </div>
-                  );
-                }
-                if (md) return <div className="ml-2"><CircularProgress progress={md.progress} /></div>;
+            <button
+              onClick={() =>
+                openDownloadModal({
+                  type: details.type,
+                  tmdbId: details.id,
+                  imdbId: details.imdb_id,
+                  title: details.title,
+                  year: details.year,
+                  posterPath: details.poster_path,
+                  ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
+                })
               }
-              return (
-                <button
-                  onClick={() =>
-                    openDownloadModal({
-                      type: details.type,
-                      tmdbId: details.id,
-                      imdbId: details.imdb_id,
-                      title: details.title,
-                      year: details.year,
-                      posterPath: details.poster_path,
-                      ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
-                    })
-                  }
-                  disabled={downloadingTarget !== null}
-                  className="flex items-center gap-2 rounded bg-white/20 px-6 py-2.5 text-sm font-bold transition hover:bg-white/30 disabled:opacity-50"
-                >
-                  <Download size={18} />
-                  {downloadingTarget === (details.type === "tv" ? "S1E1" : "movie") ? "Starting..." : "Download"}
-                </button>
-              );
-            })()}
+              disabled={downloadingTarget !== null}
+              className="flex items-center gap-2 rounded bg-white/20 px-6 py-2.5 text-sm font-bold transition hover:bg-white/30 disabled:opacity-50"
+            >
+              <Download size={18} />
+              {downloadingTarget === (details.type === "tv" ? "S1E1" : "movie") ? "Starting..." : "Download"}
+            </button>
             <button
               onClick={() => toggle(mediaItem)}
               className="flex items-center gap-2 rounded bg-white/25 px-6 py-2.5 text-sm font-semibold backdrop-blur transition hover:bg-white/15"
@@ -342,34 +258,15 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                   <div key={i} className="h-[104px] animate-pulse rounded bg-elevated" />
                 ))
               : episodes.map((ep: any) => {
-                  const activeDownload = activeDownloads.find(
-                    (d) =>
-                      d.type === "tv" &&
-                      d.tmdbId === details.id &&
-                      d.season === ep.season_number &&
-                      d.episode === ep.episode_number
-                  );
-                  const isDownloaded = activeDownload?.done;
+                  const watched = isEpisodeWatched(ep.season_number, ep.episode_number);
                   const still = tmdbImg(ep.still_path, "w300");
                   const expanded = showOverview[ep.episode_number];
-                  
-                  const progressEntry = progresses.find(
-                    (p) =>
-                      p.type === "tv" &&
-                      p.tmdbId === details.id &&
-                      p.season === ep.season_number &&
-                      p.episode === ep.episode_number
-                  );
-                  const progressPercent =
-                    progressEntry && progressEntry.duration > 0
-                      ? Math.min(100, Math.max(0, (progressEntry.position / progressEntry.duration) * 100))
-                      : 0;
-
                   return (
                     <div
                       key={ep.id}
                       className={cn(
-                        "group flex gap-4 rounded-lg p-3 transition-colors hover:bg-elevated"
+                        "group flex gap-4 rounded-lg p-3 transition-colors hover:bg-elevated",
+                        watched && "opacity-75"
                       )}
                     >
                       <button
@@ -398,16 +295,11 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                             <Play size={16} fill="currentColor" />
                           </span>
                         </span>
-                        {progressPercent > 0 && (
-                          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
-                            <div className="h-full bg-brand" style={{ width: `${progressPercent}%` }} />
-                          </div>
-                        )}
                       </button>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
+                          <div className="min-w-0">
                             <h3 className="truncate text-sm font-semibold">
                               {ep.episode_number}. {ep.name}
                             </h3>
@@ -416,35 +308,36 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                               {ep.air_date ? ` · ${ep.air_date}` : ""}
                             </p>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {isDownloaded || (activeDownload && activeDownload.progress >= 1) ? (
-                              <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold text-emerald-400 border border-emerald-500/30" title="Downloaded">
-                                <Check size={12} />
-                                Downloaded
-                              </span>
-                            ) : activeDownload ? (
-                              <CircularProgress progress={activeDownload.progress} />
-                            ) : (
-                              <button
-                                onClick={() => openDownloadModal({
-                                  type: "tv",
-                                  tmdbId: details.id,
-                                  imdbId: details.imdb_id,
-                                  title: details.title,
-                                  year: details.year,
-                                  season: ep.season_number,
-                                  episode: ep.episode_number,
-                                  episodeName: ep.name,
-                                  posterPath: details.poster_path,
-                                })}
-                                disabled={downloadingTarget !== null}
-                                title="Download episode"
-                                className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-white hover:text-white disabled:opacity-50"
-                              >
-                                <Download size={13} />
-                              </button>
+                          <button
+                            onClick={() => toggleEpisode(ep.season_number, ep.episode_number)}
+                            title={watched ? "Mark unwatched" : "Mark watched"}
+                            className={cn(
+                              "shrink-0 rounded-full border p-1.5 transition",
+                              watched
+                                ? "border-brand bg-brand text-white"
+                                : "border-white/30 text-muted hover:border-white hover:text-white"
                             )}
-                          </div>
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            onClick={() => openDownloadModal({
+                              type: "tv",
+                              tmdbId: details.id,
+                              imdbId: details.imdb_id,
+                              title: details.title,
+                              year: details.year,
+                              season: ep.season_number,
+                              episode: ep.episode_number,
+                              episodeName: ep.name,
+                              posterPath: details.poster_path,
+                            })}
+                            disabled={downloadingTarget !== null}
+                            title="Download episode"
+                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-white hover:text-white disabled:opacity-50"
+                          >
+                            <Download size={13} />
+                          </button>
                         </div>
                         <p
                           className={cn(

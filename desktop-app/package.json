@@ -1,0 +1,56 @@
+{
+  "name": "torrent-streamer",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "electron": "electron .",
+    "desktop:build": "next build && cp -r public .next/standalone/desktop-app/ && cp -r .next/static .next/standalone/desktop-app/.next/ && electron-builder"
+  },
+  "build": {
+    "appId": "com.torrentflix.desktop",
+    "productName": "TorrentFlix",
+    "asar": false,
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      ".next/standalone/**/*",
+      "main.js",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "mac": {
+      "target": "dmg"
+    }
+  },
+  "dependencies": {
+    "axios": "^1.19.0",
+    "cheerio": "^1.2.0",
+    "https-proxy-agent": "^9.1.0",
+    "lucide-react": "^1.33.0",
+    "next": "16.3.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "webtorrent": "^3.0.21"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/webtorrent": "^0.110.2",
+    "concurrently": "^10.0.5",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.2",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wait-on": "^9.1.0"
+  }
+}

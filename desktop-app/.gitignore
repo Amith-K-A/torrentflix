@@ -57,7 +57,3 @@ downloads/
 
 # ide & scratch
 .zcode/
-scratch.js
-patch-remove.js
-test-*
-test_*

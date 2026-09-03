@@ -65,11 +65,7 @@ function SearchInner() {
         .then((data) => {
           if (!isMounted) return;
           const filtered = (data.results ?? []).filter(
-            (x: any) => {
-              if (x.media_type !== "movie" && x.media_type !== "tv") return false;
-              const title = (x.title || x.name || "").toLowerCase();
-              return title.includes(q.toLowerCase());
-            }
+            (x: any) => x.media_type === "movie" || x.media_type === "tv"
           );
           setItems((prev) => (page === 1 ? filtered : deduplicate(prev, filtered)));
           setTotalPages(Math.min(data.total_pages ?? 1, 50));
@@ -136,13 +132,12 @@ function SearchInner() {
         )}
       </h1>
 
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 md:gap-4">
+      <div className="mt-6 flex flex-wrap gap-3 md:gap-4">
         {loading && page === 1
-          ? Array.from({ length: 18 }).map((_, i) => <SkeletonCard key={i} className="w-full" />)
+          ? Array.from({ length: 12 }).map((_, i) => <SkeletonCard key={i} />)
           : items.map((r: any) => (
               <MediaCard
                 key={`${r.media_type}-${r.id}`}
-                className="w-full"
                 item={{
                   id: r.id,
                   media_type: r.media_type,
@@ -161,9 +156,9 @@ function SearchInner() {
 
       {/* Skeletons while loading subsequent search pages */}
       {loadingMore && (
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 md:gap-4">
+        <div className="mt-4 flex flex-wrap gap-3 md:gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
-            <SkeletonCard key={`search-more-${i}`} className="w-full" />
+            <SkeletonCard key={`search-more-${i}`} />
           ))}
         </div>
       )}

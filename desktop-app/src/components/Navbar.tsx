@@ -6,8 +6,6 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-import { useDebounce } from "@/hooks/useDebounce";
-
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/browse?type=movie", label: "Movies" },
@@ -24,22 +22,7 @@ function NavbarInner() {
   const [scrolled, setScrolled] = useState(false);
   const [searchOpen, setSearchOpen] = useState(Boolean(searchParams.get("q")));
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
-  const debouncedQuery = useDebounce(query, 500);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const isActive = (href: string) => {
-    const [basePath, search] = href.split("?");
-    if (href === "/") return pathname === "/";
-    if (!pathname.startsWith(basePath)) return false;
-    
-    if (search) {
-      const params = new URLSearchParams(search);
-      for (const [key, value] of Array.from(params.entries())) {
-        if (searchParams.get(key) !== value) return false;
-      }
-    }
-    return true;
-  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -65,22 +48,6 @@ function NavbarInner() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  useEffect(() => {
-    // Only sync the URL when the user is actively on the search page.
-    // Without this guard, navigating away (e.g. clicking a result to /watch)
-    // would be overridden by a replace() back to /search.
-    if (pathname !== "/search" && pathname !== "/") return;
-
-    const currentQ = searchParams.get("q") ?? "";
-    if (debouncedQuery !== currentQ && searchOpen) {
-      if (debouncedQuery.trim()) {
-        router.replace(`/search?q=${encodeURIComponent(debouncedQuery.trim())}`);
-      } else if (pathname === "/search") {
-        router.replace("/");
-      }
-    }
-  }, [debouncedQuery, searchParams, router, pathname, searchOpen]);
-
   const submit = (value: string) => {
     const q = value.trim();
     if (q) router.push(`/search?q=${encodeURIComponent(q)}`);
@@ -103,7 +70,10 @@ function NavbarInner() {
 
         <ul className="hidden items-center gap-5 text-sm md:flex">
           {LINKS.map((l) => {
-            const active = isActive(l.href);
+            const active =
+              l.href === "/"
+                ? pathname === "/"
+                : pathname.startsWith(l.href.split("?")[0]);
             return (
               <li key={l.href}>
                 <Link
@@ -172,7 +142,8 @@ function NavbarInner() {
       {/* mobile nav */}
       <ul className="flex items-center gap-4 overflow-x-auto px-4 pb-2 text-xs no-scrollbar md:hidden">
         {LINKS.map((l) => {
-          const active = isActive(l.href);
+          const active =
+            l.href === "/" ? pathname === "/" : pathname.startsWith(l.href.split("?")[0]);
           return (
             <li key={l.href} className="shrink-0">
               <Link
