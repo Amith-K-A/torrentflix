@@ -8,6 +8,17 @@ let mainWindow;
 let serverProcess;
 let pythonDaemon;
 
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => resolve(false));
+    srv.once("listening", () => {
+      srv.close(() => resolve(true));
+    });
+    srv.listen(port, "127.0.0.1");
+  });
+}
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -19,8 +30,16 @@ function getFreePort() {
   });
 }
 
+async function getAppPort() {
+  const PREFERRED_PORT = 34567;
+  if (await isPortAvailable(PREFERRED_PORT)) {
+    return PREFERRED_PORT;
+  }
+  return getFreePort();
+}
+
 async function createWindow() {
-  const port = await getFreePort();
+  const port = await getAppPort();
   
   // Start Python libtorrent daemon
   const pythonPath = path.join(__dirname, "torrentd.py");
@@ -56,6 +75,7 @@ async function createWindow() {
       height: 800,
       webPreferences: {
         nodeIntegration: true,
+        contextIsolation: false,
       },
     });
 

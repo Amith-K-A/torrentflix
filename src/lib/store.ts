@@ -14,20 +14,101 @@ const PROGRESS_KEY = "tf:progress";
 
 export const STORE_EVENT = "tf:store-changed";
 
+// In-memory fallback in case localStorage is unavailable or empty
+const memoryStore: Record<string, any> = {};
+let syncInitialized = false;
+let pendingSaves: Record<string, any> = {};
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushSaveToServer() {
+  if (Object.keys(pendingSaves).length === 0) return;
+  const updates = { ...pendingSaves };
+  pendingSaves = {};
+  fetch("/api/store", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ store: updates }),
+  }).catch(() => {});
+}
+
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
     const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      memoryStore[key] = parsed;
+      return parsed as T;
+    }
+  } catch {}
+  if (memoryStore[key] !== undefined) {
+    return memoryStore[key] as T;
   }
+  return fallback;
 }
 
 function write(key: string, value: unknown) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
-  window.dispatchEvent(new CustomEvent(STORE_EVENT));
+  memoryStore[key] = value;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {}
+    window.dispatchEvent(new CustomEvent(STORE_EVENT));
+  }
+
+  // Persist to server disk (.store.json)
+  pendingSaves[key] = value;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSaveToServer, 400);
+}
+
+// Background sync on startup: loads persistent data from server disk
+export function initStoreSync() {
+  if (typeof window === "undefined" || syncInitialized) return;
+  syncInitialized = true;
+
+  fetch("/api/store")
+    .then((r) => r.json())
+    .then((data) => {
+      const diskStore = data?.store;
+      if (!diskStore || typeof diskStore !== "object") return;
+
+      let changed = false;
+      for (const [k, v] of Object.entries(diskStore)) {
+        const localVal = read<any>(k, null);
+        const isEmpty =
+          localVal === null ||
+          localVal === undefined ||
+          (Array.isArray(localVal) && (localVal as any[]).length === 0) ||
+          (typeof localVal === "object" && Object.keys(localVal as object).length === 0);
+
+        if (isEmpty) {
+          memoryStore[k] = v;
+          try {
+            window.localStorage.setItem(k, JSON.stringify(v));
+          } catch {}
+          changed = true;
+        } else if (k === PROGRESS_KEY && typeof localVal === "object" && typeof v === "object") {
+          // Merge progress entries so newest wins
+          const merged = { ...(v as any), ...(localVal as any) };
+          memoryStore[k] = merged;
+          try {
+            window.localStorage.setItem(k, JSON.stringify(merged));
+          } catch {}
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        window.dispatchEvent(new CustomEvent(STORE_EVENT));
+      }
+    })
+    .catch(() => {});
+}
+
+// Trigger sync on load
+if (typeof window !== "undefined") {
+  initStoreSync();
 }
 
 /* ---------------- watchlist ---------------- */
