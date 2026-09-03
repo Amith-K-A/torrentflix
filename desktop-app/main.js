@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, shell } = require("electron");
 const path = require("path");
 const { fork, spawn } = require("child_process");
 
@@ -57,6 +57,21 @@ async function createWindow() {
       webPreferences: {
         nodeIntegration: true,
       },
+    });
+
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith("magnet:") || url.startsWith("http:") || url.startsWith("https:")) {
+        shell.openExternal(url);
+        return { action: "deny" };
+      }
+      return { action: "allow" };
+    });
+
+    mainWindow.webContents.on("will-navigate", (event, url) => {
+      if (url.startsWith("magnet:")) {
+        event.preventDefault();
+        shell.openExternal(url);
+      }
     });
 
     mainWindow.loadURL(`http://localhost:${port}`);

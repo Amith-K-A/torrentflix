@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CircleHelp, Play, Plus, Star, Download, X, Copy, Magnet } from "lucide-react";
+import { Check, CircleHelp, Play, Plus, Star, Download, X, Copy, Magnet, Loader2 } from "lucide-react";
 import { cn, tmdbImg, playabilityRank, qualityRank } from "@/lib/utils";
 import type { EpisodeItem, MediaItem, PlayTarget, TorrentResult } from "@/lib/types";
 import type { MediaDetails } from "@/lib/tmdb";
@@ -29,6 +29,9 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   const [downloadSources, setDownloadSources] = useState<TorrentResult[] | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const [sourcesCache] = useState<Record<string, TorrentResult[]>>({});
+  const [quickLoading, setQuickLoading] = useState<string | null>(null);
+
   async function handleCopyMagnet(magnet: string, id: string) {
     if (!magnet) return;
     try {
@@ -43,9 +46,74 @@ export default function WatchView({ details }: { details: MediaDetails }) {
         document.body.removeChild(el);
       }
       setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
+      setTimeout(() => setCopiedId(null), 2500);
     } catch (err) {
       console.error("Failed to copy magnet:", err);
+    }
+  }
+
+  async function fetchBestTorrent(t: PlayTarget): Promise<TorrentResult | null> {
+    const key = t.type === "tv" ? `S${t.season}E${t.episode}` : "movie";
+    if (sourcesCache[key]?.length) {
+      return sourcesCache[key][0];
+    }
+
+    const params = new URLSearchParams({
+      type: t.type,
+      title: t.title,
+      tmdbId: String(t.tmdbId),
+    });
+    if (t.imdbId) params.set("imdbId", t.imdbId);
+    if (t.year) params.set("year", t.year);
+    if (t.season) params.set("season", String(t.season));
+    if (t.episode) params.set("episode", String(t.episode));
+
+    const res = await fetch(`/api/torrents?${params}`);
+    const data = await res.json();
+    const results: TorrentResult[] = data.results ?? [];
+    if (!results.length) return null;
+
+    const sorted = [...results].sort(
+      (a, b) =>
+        Number(b.seeds > 0) - Number(a.seeds > 0) ||
+        Number(b.source === "yts") - Number(a.source === "yts") ||
+        playabilityRank(a.name) - playabilityRank(b.name) ||
+        b.seeds - a.seeds ||
+        Math.abs(qualityRank(b.quality) - 3) - Math.abs(qualityRank(a.quality) - 3)
+    );
+    sourcesCache[key] = sorted;
+    return sorted[0];
+  }
+
+  async function handleQuickCopyMagnet(t: PlayTarget, actionId: string) {
+    setQuickLoading(actionId);
+    try {
+      const best = await fetchBestTorrent(t);
+      if (!best?.magnet) {
+        alert("No magnet link found for this title.");
+        return;
+      }
+      await handleCopyMagnet(best.magnet, actionId);
+    } catch (err) {
+      alert("Failed to find magnet link.");
+    } finally {
+      setQuickLoading(null);
+    }
+  }
+
+  async function handleQuickDownloadMagnet(t: PlayTarget, actionId: string) {
+    setQuickLoading(actionId);
+    try {
+      const best = await fetchBestTorrent(t);
+      if (!best?.magnet) {
+        alert("No magnet link found for this title.");
+        return;
+      }
+      window.location.href = best.magnet;
+    } catch (err) {
+      alert("Failed to open magnet link.");
+    } finally {
+      setQuickLoading(null);
     }
   }
 
@@ -249,10 +317,81 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                 })
               }
               disabled={downloadingTarget !== null}
-              className="flex items-center gap-2 rounded bg-white/20 px-6 py-2.5 text-sm font-bold transition hover:bg-white/30 disabled:opacity-50"
+              className="flex items-center gap-2 rounded bg-white/20 px-6 py-2.5 text-sm font-bold transition hover:bg-white/30 disabled:opacity-50 cursor-pointer"
             >
               <Download size={18} />
               {downloadingTarget === (details.type === "tv" ? "S1E1" : "movie") ? "Starting..." : "Download"}
+            </button>
+            {/* Direct Copy Magnet URL on Movie/Show Hero */}
+            <button
+              type="button"
+              onClick={() =>
+                handleQuickCopyMagnet(
+                  {
+                    type: details.type,
+                    tmdbId: details.id,
+                    imdbId: details.imdb_id,
+                    title: details.title,
+                    year: details.year,
+                    posterPath: details.poster_path,
+                    ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
+                  },
+                  "hero-copy"
+                )
+              }
+              disabled={quickLoading !== null}
+              title="Copy magnet link of best source to clipboard"
+              className="flex items-center gap-2 rounded bg-white/15 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/25 disabled:opacity-50 cursor-pointer"
+            >
+              {copiedId === "hero-copy" ? (
+                <>
+                  <Check size={18} className="text-emerald-400" />
+                  <span className="text-emerald-400 font-bold">Copied!</span>
+                </>
+              ) : quickLoading === "hero-copy" ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  <span>Finding...</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={18} />
+                  <span>Copy Magnet</span>
+                </>
+              )}
+            </button>
+            {/* Direct Download Magnet on Movie/Show Hero */}
+            <button
+              type="button"
+              onClick={() =>
+                handleQuickDownloadMagnet(
+                  {
+                    type: details.type,
+                    tmdbId: details.id,
+                    imdbId: details.imdb_id,
+                    title: details.title,
+                    year: details.year,
+                    posterPath: details.poster_path,
+                    ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
+                  },
+                  "hero-download"
+                )
+              }
+              disabled={quickLoading !== null}
+              title="Open magnet link in external BitTorrent app (qBittorrent, etc.)"
+              className="flex items-center gap-2 rounded bg-white/15 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/25 hover:text-brand disabled:opacity-50 cursor-pointer"
+            >
+              {quickLoading === "hero-download" ? (
+                <>
+                  <Loader2 size={18} className="animate-spin text-brand" />
+                  <span>Opening...</span>
+                </>
+              ) : (
+                <>
+                  <Magnet size={18} className="text-brand" />
+                  <span>Download Magnet</span>
+                </>
+              )}
             </button>
             <button
               onClick={() => toggle(mediaItem)}
@@ -355,9 +494,69 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                             })}
                             disabled={downloadingTarget !== null}
                             title="Download episode"
-                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-white hover:text-white disabled:opacity-50"
+                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-white hover:text-white disabled:opacity-50 cursor-pointer"
                           >
                             <Download size={13} />
+                          </button>
+                          {/* Copy Magnet URL for episode */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuickCopyMagnet(
+                                {
+                                  type: "tv",
+                                  tmdbId: details.id,
+                                  imdbId: details.imdb_id,
+                                  title: details.title,
+                                  year: details.year,
+                                  season: ep.season_number,
+                                  episode: ep.episode_number,
+                                  episodeName: ep.name,
+                                  posterPath: details.poster_path,
+                                },
+                                `ep-${ep.episode_number}-copy`
+                              )
+                            }
+                            disabled={quickLoading !== null}
+                            title="Copy magnet URL for this episode"
+                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-white hover:text-white disabled:opacity-50 cursor-pointer"
+                          >
+                            {copiedId === `ep-${ep.episode_number}-copy` ? (
+                              <Check size={13} className="text-emerald-400" />
+                            ) : quickLoading === `ep-${ep.episode_number}-copy` ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <Copy size={13} />
+                            )}
+                          </button>
+                          {/* Download Magnet for episode in external client */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuickDownloadMagnet(
+                                {
+                                  type: "tv",
+                                  tmdbId: details.id,
+                                  imdbId: details.imdb_id,
+                                  title: details.title,
+                                  year: details.year,
+                                  season: ep.season_number,
+                                  episode: ep.episode_number,
+                                  episodeName: ep.name,
+                                  posterPath: details.poster_path,
+                                },
+                                `ep-${ep.episode_number}-download`
+                              )
+                            }
+                            disabled={quickLoading !== null}
+                            title="Open / Download magnet in external BitTorrent client"
+                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-brand hover:text-brand disabled:opacity-50 cursor-pointer"
+                          >
+                            {quickLoading === `ep-${ep.episode_number}-download` ? (
+                              <Loader2 size={13} className="animate-spin text-brand" />
+                            ) : (
+                              <Magnet size={13} className="text-brand" />
+                            )}
                           </button>
                         </div>
                         <p
