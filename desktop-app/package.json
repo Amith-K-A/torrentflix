@@ -26,7 +26,8 @@
       "!node_modules/**/*"
     ],
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "build/icon.icns"
     }
   },
   "dependencies": {

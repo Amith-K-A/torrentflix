@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
@@ -97,8 +98,13 @@ function NavbarInner() {
       )}
     >
       <nav className="flex items-center gap-6 px-4 py-3 md:px-10">
-        <Link href="/" className="shrink-0 text-2xl font-black tracking-tight text-brand md:text-[26px]">
-          TORRENTFLIX
+        <Link href="/" className="shrink-0 flex items-center gap-2.5 group">
+          <div className="relative h-7 w-7 sm:h-8 sm:w-8 overflow-hidden rounded-lg shadow-sm shadow-brand/30 transition-transform group-hover:scale-105">
+            <Image src="/logo.png" alt="TorrentFlix" fill sizes="32px" className="object-cover" priority />
+          </div>
+          <span className="text-xl font-black tracking-tight text-brand md:text-[24px]">
+            TORRENTFLIX
+          </span>
         </Link>
 
         <ul className="hidden items-center gap-5 text-sm md:flex">
