@@ -13,6 +13,41 @@ import PlayerOverlay from "./PlayerOverlay";
 import SeasonTabs from "./SeasonTabs";
 import MediaCard from "./MediaCard";
 
+const CircularProgress = ({ progress }: { progress: number }) => {
+  const radius = 12;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (progress * circumference);
+  
+  return (
+    <div title={`Downloading ${Math.round(progress * 100)}%`} className="relative flex items-center justify-center shrink-0 min-w-[28px] h-[28px]">
+      <svg className="absolute inset-0 w-full h-full -rotate-90">
+        <circle
+          cx="14"
+          cy="14"
+          r={radius}
+          className="stroke-gray-700"
+          strokeWidth="2.5"
+          fill="none"
+        />
+        <circle
+          cx="14"
+          cy="14"
+          r={radius}
+          className="stroke-red-500 transition-all duration-300 ease-out"
+          strokeWidth="2.5"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          fill="none"
+          strokeLinecap="round"
+        />
+      </svg>
+      <span className="text-[9px] font-bold tracking-tighter text-white relative z-10">
+        {Math.round(progress * 100)}%
+      </span>
+    </div>
+  );
+};
+
 export default function WatchView({ details }: { details: MediaDetails }) {
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(details.type === "tv");
@@ -23,8 +58,8 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   const [mounted, setMounted] = useState(false);
 
   const { has, toggle } = useWatchlist();
-  const { isEpisodeWatched, toggleEpisode } = useWatchedEpisodes(details.id);
   const progresses = useProgressList();
+  const { isEpisodeWatched } = useWatchedEpisodes(details.id);
 
   const currentEpisodeTarget = useMemo(() => {
     if (!mounted) {
@@ -158,6 +193,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   const [downloadModalTarget, setDownloadModalTarget] = useState<PlayTarget | null>(null);
   const [downloadModalMode, setDownloadModalMode] = useState<"download" | "magnet">("download");
   const [downloadSources, setDownloadSources] = useState<TorrentResult[] | null>(null);
+  const [activeDownloads, setActiveDownloads] = useState<any[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [downloadedMagnetId, setDownloadedMagnetId] = useState<string | null>(null);
 
@@ -167,26 +203,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   function handleDownloadMagnetFile(magnet: string, filename: string, id: string) {
     if (!magnet) return;
 
-    // 1. Download actual .magnet file to user's computer via browser download manager
-    try {
-      const cleanName = (filename || "torrent")
-        .replace(/[/\\?%*:|"<>]/g, "_")
-        .replace(/\s+/g, " ")
-        .trim();
-      const blob = new Blob([magnet.trim() + "\n"], { type: "text/plain;charset=utf-8" });
-      const blobUrl = URL.createObjectURL(blob);
-      const dlLink = document.createElement("a");
-      dlLink.href = blobUrl;
-      dlLink.download = `${cleanName}.magnet`;
-      document.body.appendChild(dlLink);
-      dlLink.click();
-      document.body.removeChild(dlLink);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-    } catch (e) {
-      console.error("Failed to trigger magnet file download:", e);
-    }
-
-    // 2. Also invoke OS magnet: protocol silently via invisible iframe (doesn't open blank tabs)
+    // 1. Invoke OS magnet: protocol silently via invisible iframe (launches qBittorrent/BitTorrent if installed)
     try {
       const iframe = document.createElement("iframe");
       iframe.style.display = "none";
@@ -197,14 +214,14 @@ export default function WatchView({ details }: { details: MediaDetails }) {
       }, 3000);
     } catch {}
 
-    // 3. Copy to clipboard as convenience
+    // 2. Copy to clipboard as convenience
     try {
       if (navigator?.clipboard?.writeText) {
         navigator.clipboard.writeText(magnet).catch(() => {});
       }
     } catch {}
 
-    // 4. Visual confirmation
+    // 3. Visual confirmation on button
     setDownloadedMagnetId(id);
     setTimeout(() => setDownloadedMagnetId(null), 3000);
   }
@@ -324,6 +341,26 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   }
 
   useEffect(() => {
+    let mounted = true;
+    const fetchDownloads = () => {
+      fetch("/api/downloads")
+        .then((r) => r.json())
+        .then((data) => {
+          if (mounted) setActiveDownloads(data);
+        })
+        .catch(() => {});
+    };
+    
+    fetchDownloads();
+    const interval = setInterval(fetchDownloads, 2000);
+    
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
     setMounted(true);
   }, []);
 
@@ -435,6 +472,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
       );
 
       setDownloadSources(sorted);
+      sourcesCache[key] = sorted;
       setDownloadModalTarget(t);
     } catch (err) {
       alert("Failed to fetch sources.");
@@ -451,19 +489,31 @@ export default function WatchView({ details }: { details: MediaDetails }) {
     setDownloadModalTarget(null);
 
     try {
-      await fetch("/api/downloads/add", {
+      const res = await fetch("/api/downloads/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           magnet: source.magnet,
           title: label,
           posterPath: t.posterPath,
+          fileIdx: source.fileIdx,
+          type: t.type,
+          tmdbId: t.tmdbId,
+          imdbId: t.imdbId,
+          season: t.season,
+          episode: t.episode,
+          episodeName: t.episodeName,
         }),
       });
 
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to start download");
+      }
+
       router.push("/downloads");
-    } catch (err) {
-      alert("Failed to start download.");
+    } catch (err: any) {
+      alert(err.message || "Failed to start download.");
     }
   }
 
@@ -561,32 +611,53 @@ export default function WatchView({ details }: { details: MediaDetails }) {
             </button>
 
             {/* In-App Download */}
-            <button
-              onClick={() =>
-                openDownloadModal({
-                  type: details.type,
-                  tmdbId: details.id,
-                  imdbId: details.imdb_id,
-                  title: details.title,
-                  year: details.year,
-                  posterPath: details.poster_path,
-                  ...(details.type === "tv"
-                    ? {
-                        season: currentEpisodeTarget.season,
-                        episode: currentEpisodeTarget.episode,
-                        episodeName: currentEpisodeTarget.episodeName,
-                      }
-                    : {}),
-                })
+            {(() => {
+              if (details.type === "movie") {
+                const md = activeDownloads.find(d => d.type === "movie" && d.tmdbId === details.id);
+                if (md?.done || (md && md.progress >= 1)) {
+                  return (
+                    <div className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/15 px-5 text-sm font-semibold text-emerald-400 whitespace-nowrap shadow-sm">
+                      <Check size={18} />
+                      <span>Downloaded</span>
+                    </div>
+                  );
+                }
+                if (md) return (
+                  <div className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 text-sm font-semibold text-white/90 whitespace-nowrap">
+                    <CircularProgress progress={md.progress} />
+                    <span>Downloading...</span>
+                  </div>
+                );
               }
-              disabled={downloadingTarget !== null}
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur-md transition hover:bg-white/20 hover:text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
-            >
-              <Download size={18} />
-              <span>
-                {downloadingTarget === (details.type === "tv" ? `S${currentEpisodeTarget.season}E${currentEpisodeTarget.episode}` : "movie") ? "Starting..." : "In-App Download"}
-              </span>
-            </button>
+              return (
+                <button
+                  onClick={() =>
+                    openDownloadModal({
+                      type: details.type,
+                      tmdbId: details.id,
+                      imdbId: details.imdb_id,
+                      title: details.title,
+                      year: details.year,
+                      posterPath: details.poster_path,
+                      ...(details.type === "tv"
+                        ? {
+                            season: currentEpisodeTarget.season,
+                            episode: currentEpisodeTarget.episode,
+                            episodeName: currentEpisodeTarget.episodeName,
+                          }
+                        : {}),
+                    })
+                  }
+                  disabled={downloadingTarget !== null}
+                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur-md transition hover:bg-white/20 hover:text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
+                >
+                  <Download size={18} />
+                  <span>
+                    {downloadingTarget === (details.type === "tv" ? `S${currentEpisodeTarget.season}E${currentEpisodeTarget.episode}` : "movie") ? "Starting..." : "In-App Download"}
+                  </span>
+                </button>
+              );
+            })()}
 
             {/* Direct Download Magnet */}
             <button
@@ -699,15 +770,34 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                   <div key={i} className="h-[104px] animate-pulse rounded bg-elevated" />
                 ))
               : episodes.map((ep: any) => {
-                  const watched = isEpisodeWatched(ep.season_number, ep.episode_number);
+                  const activeDownload = activeDownloads.find(
+                    (d) =>
+                      d.type === "tv" &&
+                      d.tmdbId === details.id &&
+                      d.season === ep.season_number &&
+                      d.episode === ep.episode_number
+                  );
+                  const isDownloaded = activeDownload?.done;
                   const still = tmdbImg(ep.still_path, "w300");
                   const expanded = showOverview[ep.episode_number];
+                  
+                  const progressEntry = progresses.find(
+                    (p) =>
+                      p.type === "tv" &&
+                      p.tmdbId === details.id &&
+                      p.season === ep.season_number &&
+                      p.episode === ep.episode_number
+                  );
+                  const progressPercent =
+                    progressEntry && progressEntry.duration > 0
+                      ? Math.min(100, Math.max(0, (progressEntry.position / progressEntry.duration) * 100))
+                      : 0;
+
                   return (
                     <div
                       key={ep.id}
                       className={cn(
-                        "group flex gap-4 rounded-lg p-3 transition-colors hover:bg-elevated",
-                        watched && "opacity-75"
+                        "group flex gap-4 rounded-lg p-3 transition-colors hover:bg-elevated"
                       )}
                     >
                       <button
@@ -736,11 +826,16 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                             <Play size={16} fill="currentColor" />
                           </span>
                         </span>
+                        {progressPercent > 0 && (
+                          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+                            <div className="h-full bg-brand" style={{ width: `${progressPercent}%` }} />
+                          </div>
+                        )}
                       </button>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <h3 className="truncate text-sm font-semibold">
                               {ep.episode_number}. {ep.name}
                             </h3>
@@ -750,36 +845,35 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              onClick={() => toggleEpisode(ep.season_number, ep.episode_number)}
-                              title={watched ? "Mark unwatched" : "Mark watched"}
-                              className={cn(
-                                "inline-flex h-8 w-8 items-center justify-center rounded-full border transition cursor-pointer",
-                                watched
-                                  ? "border-brand bg-brand text-white"
-                                  : "border-white/20 bg-white/5 text-muted hover:border-white hover:text-white hover:bg-white/10"
-                              )}
-                            >
-                              <Check size={13} />
-                            </button>
-                            <button
-                              onClick={() => openDownloadModal({
-                                type: "tv",
-                                tmdbId: details.id,
-                                imdbId: details.imdb_id,
-                                title: details.title,
-                                year: details.year,
-                                season: ep.season_number,
-                                episode: ep.episode_number,
-                                episodeName: ep.name,
-                                posterPath: details.poster_path,
-                              })}
-                              disabled={downloadingTarget !== null}
-                              title="Download episode"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5 text-muted transition hover:border-white hover:text-white hover:bg-white/10 disabled:opacity-50 cursor-pointer"
-                            >
-                              <Download size={13} />
-                            </button>
+                            {isDownloaded || (activeDownload && activeDownload.progress >= 1) ? (
+                              <span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-emerald-500/20 px-3 text-xs font-semibold text-emerald-400 border border-emerald-500/30 whitespace-nowrap" title="Downloaded">
+                                <Check size={12} />
+                                Downloaded
+                              </span>
+                            ) : activeDownload ? (
+                              <div className="inline-flex h-8 w-8 items-center justify-center">
+                                <CircularProgress progress={activeDownload.progress} />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => openDownloadModal({
+                                  type: "tv",
+                                  tmdbId: details.id,
+                                  imdbId: details.imdb_id,
+                                  title: details.title,
+                                  year: details.year,
+                                  season: ep.season_number,
+                                  episode: ep.episode_number,
+                                  episodeName: ep.name,
+                                  posterPath: details.poster_path,
+                                })}
+                                disabled={downloadingTarget !== null}
+                                title="Download episode"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5 text-muted transition hover:border-white hover:text-white hover:bg-white/10 disabled:opacity-50 cursor-pointer"
+                              >
+                                <Download size={13} />
+                              </button>
+                            )}
                             {/* Copy Magnet URL for episode */}
                             <button
                               type="button"
@@ -1002,7 +1096,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
 
                     {/* 2. Metadata Badges */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded bg-brand/20 px-2.5 py-0.5 text-xs font-bold text-brand border border-brand/30">
+                      <span className="rounded bg-brand/20 px-2 py-0.5 text-xs font-bold text-brand border border-brand/30">
                         {s.quality}
                       </span>
                       {s.source === "yts" && (
@@ -1011,12 +1105,12 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                         </span>
                       )}
                       {s.size && (
-                        <span className="rounded border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/90">
+                        <span className="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-xs font-medium text-white/90">
                           {s.size}
                         </span>
                       )}
                       <span className={cn(
-                        "flex items-center gap-1.5 rounded px-2.5 py-0.5 text-xs font-semibold border",
+                        "flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold border",
                         s.seeds > 0
                           ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
                           : "border-white/10 bg-white/5 text-muted"

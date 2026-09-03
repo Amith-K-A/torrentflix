@@ -17,6 +17,71 @@ export async function GET(req: NextRequest) {
     return new NextResponse(null, { status: 499 });
   }
 
+  if ((globalThis as any).__ltDownloads?.has(infoHash)) {
+    try {
+      const targetUrl = `http://127.0.0.1:8080/stream?infoHash=${infoHash}&fileIdx=${fileIdx}`;
+      
+      const reqHeaders: Record<string, string> = {};
+      const range = req.headers.get("range");
+      if (range) reqHeaders["Range"] = range;
+
+      const res = await fetch(targetUrl, { headers: reqHeaders, signal: req.signal });
+      
+      if (res.ok || res.status === 206) {
+        let streamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+        
+        const wrapperStream = new ReadableStream({
+          async start(controller) {
+            streamReader = res.body?.getReader();
+            if (!streamReader) {
+              controller.close();
+              return;
+            }
+            try {
+              while (true) {
+                const { done, value } = await streamReader.read();
+                if (done) break;
+                controller.enqueue(value);
+              }
+              controller.close();
+            } catch (e: any) {
+              if (
+                e.name === 'AbortError' || 
+                e.code === 'UND_ERR_RES_CONTENT_LENGTH_MISMATCH' || 
+                (e.message && e.message.includes('Aborted')) ||
+                (e.message && e.message.includes('terminated'))
+              ) {
+                controller.close();
+              } else {
+                controller.error(e);
+              }
+            }
+          },
+          cancel() {
+            if (streamReader) {
+              streamReader.cancel().catch(() => {});
+            }
+          }
+        });
+
+        return new NextResponse(wrapperStream as any, {
+          status: res.status,
+          headers: Object.fromEntries(res.headers.entries()),
+        });
+      }
+    } catch (e: any) {
+      if (
+        req.signal.aborted || 
+        e.name === 'AbortError' || 
+        (e.message && e.message.includes('Aborted')) ||
+        e.code === 'UND_ERR_RES_CONTENT_LENGTH_MISMATCH'
+      ) {
+        return new NextResponse(null, { status: 499 }); // 499 Client Closed Request
+      }
+      console.warn("Libtorrent proxy failed, trying WebTorrent...", e);
+    }
+  }
+
   const found = await getTorrentFile(infoHash, fileIdx);
   if (!found) {
     return NextResponse.json(

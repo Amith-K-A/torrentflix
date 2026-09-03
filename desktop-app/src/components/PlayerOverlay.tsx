@@ -58,10 +58,12 @@ interface Stats {
 export default function PlayerOverlay({
   target,
   startPosition = 0,
+  preselectedSource,
   onClose,
 }: {
   target: PlayTarget;
   startPosition?: number;
+  preselectedSource?: TorrentResult;
   onClose: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>("sources");
@@ -86,6 +88,7 @@ export default function PlayerOverlay({
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null);
   const [subtitleLabel, setSubtitleLabel] = useState<string | null>(null);
   const [subtitlesLoading, setSubtitlesLoading] = useState(false);
+  const [showAudioWarning, setShowAudioWarning] = useState(false);
 
   const bufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -216,6 +219,12 @@ export default function PlayerOverlay({
   /* ---------------- source discovery ---------------- */
 
   useEffect(() => {
+    if (preselectedSource) {
+      setSources([preselectedSource]);
+      setSelected(preselectedSource);
+      return;
+    }
+
     let cancelled = false;
     (async () => {
       try {
@@ -268,7 +277,7 @@ export default function PlayerOverlay({
     return () => {
       cancelled = true;
     };
-  }, [target]);
+  }, [target, preselectedSource]);
 
   /* ---------------- start selected torrent ---------------- */
 
@@ -304,8 +313,11 @@ export default function PlayerOverlay({
       } catch (e: any) {
         if (cancelled) return;
         setPhase("error");
+        const msg = e?.message ?? "Could not start torrent";
         setError(
-          `${e?.message ?? "Could not start torrent"} — the swarm may have no seeders right now.`
+          msg.includes("daemon") || msg.includes("Daemon") || msg.includes("port 8001")
+            ? msg
+            : `${msg} — the swarm may have no seeders right now.`
         );
       }
     })();
@@ -364,8 +376,16 @@ export default function PlayerOverlay({
   const close = useCallback(() => {
     const v = videoRef.current;
     if (v && v.duration) persist(v.currentTime, v.duration);
+    // Free the streaming torrent from RAM immediately
+    if (started?.infoHash) {
+      fetch("/api/stream/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ infoHash: started.infoHash }),
+      }).catch(() => {}); // fire-and-forget
+    }
     onClose();
-  }, [onClose, persist]);
+  }, [onClose, persist, started]);
 
   /* ---------------- keyboard + idle controls ---------------- */
 
@@ -437,6 +457,7 @@ export default function PlayerOverlay({
   function toggleFullscreen() {
     const v = videoRef.current;
 
+    // Check if already fullscreen (with webkit prefix fallback)
     const fsEl = document.fullscreenElement ?? (document as any).webkitFullscreenElement;
     if (fsEl) {
       if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
@@ -444,15 +465,18 @@ export default function PlayerOverlay({
       return;
     }
 
+    // Try document.documentElement first (most reliable on desktop browsers)
     const root = document.documentElement;
     if (root.requestFullscreen) {
       root.requestFullscreen().catch((err) => {
         console.warn("Fullscreen failed on documentElement:", err);
+        // Fallback: try video element directly (iOS Safari)
         if (v && (v as any).webkitEnterFullscreen) (v as any).webkitEnterFullscreen();
       });
     } else if ((root as any).webkitRequestFullscreen) {
       (root as any).webkitRequestFullscreen();
     } else if (v && (v as any).webkitEnterFullscreen) {
+      // iOS Safari — only supports video-native fullscreen
       (v as any).webkitEnterFullscreen();
     }
   }
@@ -545,6 +569,17 @@ export default function PlayerOverlay({
   const bufferedPct = duration > 0 ? (bufferedAhead / duration) * 100 : 0;
   const cachedPct = Math.max(pct, bufferedPct);
 
+  // Dynamically added tracks might not show automatically even with the `default` attribute.
+  // Force them to 'showing' when the subtitleUrl changes.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v && v.textTracks) {
+      for (let i = 0; i < v.textTracks.length; i++) {
+        v.textTracks[i].mode = "showing";
+      }
+    }
+  }, [subtitleUrl]);
+
   /* ---------------- render ---------------- */
 
   return (
@@ -575,19 +610,24 @@ export default function PlayerOverlay({
           onPlay={() => {
             setPlaying(true);
             setNeedsTap(false);
+            if (started && !started.browserSafe) {
+              setShowAudioWarning(true);
+            }
           }}
           onPause={() => setPlaying(false)}
           onWaiting={handleWaiting}
-          onPlaying={handlePlaying}
+          onPlaying={() => {
+            handlePlaying();
+          }}
           onCanPlay={(e) => {
             handlePlaying();
             updateBuffered(e.currentTarget);
-            if (videoRef.current?.paused) tryPlay();
+            if (videoRef.current?.paused && !userPaused.current) tryPlay();
           }}
           onSeeked={(e) => {
             handlePlaying();
             updateBuffered(e.currentTarget);
-            if (videoRef.current?.paused) tryPlay();
+            if (videoRef.current?.paused && !userPaused.current) tryPlay();
           }}
           onProgress={(e) => updateBuffered(e.currentTarget)}
           onError={() => {
@@ -604,9 +644,14 @@ export default function PlayerOverlay({
             setDuration(v.duration);
             v.volume = volume;
             updateBuffered(v);
-            if (startPosition > 5 && startPosition < v.duration - 10 && !seekedToStart.current) {
-              seekedToStart.current = true;
-              v.currentTime = startPosition;
+            if (startPosition > 5 && !seekedToStart.current) {
+              // If duration is valid, check we aren't seeking to the very end.
+              // If it's NaN/Infinity, just seek anyway because raw streams often lack duration.
+              const validDuration = !Number.isNaN(v.duration) && Number.isFinite(v.duration);
+              if (!validDuration || startPosition < v.duration - 10) {
+                seekedToStart.current = true;
+                v.currentTime = startPosition;
+              }
             }
             if (v.textTracks && v.textTracks.length > 0) {
               for (let i = 0; i < v.textTracks.length; i++) {
@@ -629,10 +674,16 @@ export default function PlayerOverlay({
               srcLang="en"
               label={subtitleLabel ?? "Subtitles"}
               default
+              onLoad={(e) => {
+                const tr = e.currentTarget as HTMLTrackElement;
+                if (tr.track) tr.track.mode = "showing";
+              }}
             />
           )}
         </video>
       )}
+
+
 
       {/* tap to start — shown when the browser blocks even muted autoplay */}
       {needsTap && phase === "playing" && (
@@ -757,7 +808,7 @@ export default function PlayerOverlay({
             </span>
             <span className="flex items-center gap-1">
               <Download size={11} />
-              {Math.round(stats.progress * 100)}% cached
+              {Math.round(stats.progress * 100)}% downloaded
             </span>
           </p>
         </div>
@@ -1002,7 +1053,7 @@ export default function PlayerOverlay({
                 }
               }}
               className="tf-seek w-0 opacity-0 transition-all group-hover:w-20 group-hover:opacity-100"
-              style={{ ["--tf-progress" as any]: `${(muted ? 0 : volume) * 100}%` }}
+              style={{ ["--tf-progress" as string]: `${(muted ? 0 : volume) * 100}%` } as React.CSSProperties}
               aria-label="Volume"
             />
           </div>

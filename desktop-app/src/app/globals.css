@@ -22,6 +22,11 @@ body {
   overflow-x: hidden;
 }
 
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
 /* hide horizontal scrollbars on Netflix-style rows */
 .no-scrollbar {
   scrollbar-width: none;

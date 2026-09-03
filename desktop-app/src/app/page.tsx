@@ -97,8 +97,24 @@ export default function HomePage() {
     );
   }
 
+  const seenMedia = new Set<string>();
   const continueWatching: ContinueItem[] = progressList
-    .filter((p) => p.position > 15 && p.position / (p.duration || 1) < 0.95)
+    .filter((p) => {
+      if (p.position <= 15 || p.position / (p.duration || 1) >= 0.95) return false;
+      
+      // Strip out episode indicators (like " - S01E01") to get the base title
+      const baseTitle = p.title.replace(/\s*[-—]?\s*S\d+\s*E\d+.*/i, '').trim().toLowerCase();
+      
+      const idKey = p.tmdbId ? String(p.tmdbId) : `title:${baseTitle}`;
+      const titleKey = `title:${baseTitle}`;
+      
+      if (seenMedia.has(idKey) || seenMedia.has(titleKey)) return false;
+      
+      seenMedia.add(idKey);
+      seenMedia.add(titleKey);
+      
+      return true;
+    })
     .slice(0, 12)
     .map((p) => ({
       id: p.tmdbId,
