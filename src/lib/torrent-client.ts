@@ -874,6 +874,7 @@ export async function getAllDownloadsStats() {
       results.push({
         id: downloadId,
         infoHash,
+        magnet: meta.magnet || `magnet:?xt=urn:btih:${infoHash}`,
         title: meta.title,
         posterPath: meta.posterPath,
         name: meta.torrentName || meta.title,
@@ -903,6 +904,7 @@ export async function getAllDownloadsStats() {
       results.push({
         id: downloadId,
         infoHash,
+        magnet: meta.magnet || `magnet:?xt=urn:btih:${infoHash}`,
         title: meta.title,
         posterPath: meta.posterPath,
         progress: 0,
@@ -917,6 +919,7 @@ export async function getAllDownloadsStats() {
       results.push({
         id: downloadId,
         infoHash,
+        magnet: meta.magnet || `magnet:?xt=urn:btih:${infoHash}`,
         title: meta.title,
         posterPath: meta.posterPath,
         progress: torrent.progress ?? 0,
@@ -950,6 +953,7 @@ export async function getAllDownloadsStats() {
     results.push({
       id: downloadId,
       infoHash: torrent.infoHash,
+      magnet: meta.magnet || torrent.magnetURI || `magnet:?xt=urn:btih:${torrent.infoHash}`,
       title: meta.title,
       posterPath: meta.posterPath,
       name: torrent.name,

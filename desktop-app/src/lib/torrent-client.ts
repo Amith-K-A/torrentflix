@@ -636,6 +636,7 @@ export async function getAllDownloadsStats() {
       // It was removed somehow, maybe error
       results.push({
         infoHash,
+        magnet: meta.magnet || `magnet:?xt=urn:btih:${infoHash}`,
         title: meta.title,
         posterPath: meta.posterPath,
         progress: 0,
@@ -646,6 +647,7 @@ export async function getAllDownloadsStats() {
 
     results.push({
       infoHash: torrent.infoHash,
+      magnet: meta.magnet || torrent.magnetURI || `magnet:?xt=urn:btih:${torrent.infoHash}`,
       title: meta.title,
       posterPath: meta.posterPath,
       name: torrent.name,

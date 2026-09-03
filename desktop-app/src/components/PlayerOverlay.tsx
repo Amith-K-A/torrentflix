@@ -25,6 +25,8 @@ import {
   Volume2,
   VolumeX,
   X,
+  Copy,
+  Magnet,
 } from "lucide-react";
 import {
   cn,
@@ -71,6 +73,27 @@ export default function PlayerOverlay({
   const [started, setStarted] = useState<Started | null>(null);
   const [stats, setStats] = useState<Stats>({ progress: 0, peers: 0, downloadSpeed: 0 });
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [copiedSourceId, setCopiedSourceId] = useState<string | null>(null);
+
+  async function handleCopyMagnet(magnet?: string, id?: string) {
+    if (!magnet) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(magnet);
+      } else {
+        const el = document.createElement("textarea");
+        el.value = magnet;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setCopiedSourceId(id || "current");
+      setTimeout(() => setCopiedSourceId(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy magnet:", err);
+    }
+  }
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -748,30 +771,56 @@ export default function PlayerOverlay({
             </div>
             <div className="max-h-[50vh] space-y-1 overflow-y-auto">
               {sources.map((s) => (
-                <button
+                <div
                   key={s.id}
-                  onClick={() => {
-                    if (s.id !== selected?.id) {
-                      const v = videoRef.current;
-                      if (v?.duration) persist(v.currentTime, v.duration);
-                      setSelected(s);
-                    }
-                    setPickerOpen(false);
-                  }}
                   className={cn(
-                    "flex w-full items-center gap-3 rounded px-3 py-2.5 text-left text-sm hover:bg-elevated-hover",
+                    "flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-left text-sm hover:bg-elevated-hover transition",
                     s.id === selected?.id && "bg-elevated-hover"
                   )}
                 >
-                  <span className="w-14 shrink-0 text-xs font-bold text-brand">
-                    {s.quality}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-muted">{s.name}</span>
-                  <span className="shrink-0 text-xs text-muted">
-                    {s.size ? `${s.size} · ` : ""}👤 {s.seeds}
-                  </span>
-                  {s.id === selected?.id && <Check size={14} className="shrink-0 text-brand" />}
-                </button>
+                  <button
+                    onClick={() => {
+                      if (s.id !== selected?.id) {
+                        const v = videoRef.current;
+                        if (v?.duration) persist(v.currentTime, v.duration);
+                        setSelected(s);
+                      }
+                      setPickerOpen(false);
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
+                  >
+                    <span className="w-14 shrink-0 text-xs font-bold text-brand">
+                      {s.quality}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-white/90">{s.name}</span>
+                    <span className="shrink-0 text-xs text-muted whitespace-nowrap">
+                      {s.size ? `${s.size} · ` : ""}👤 {s.seeds}
+                    </span>
+                    {s.id === selected?.id && <Check size={14} className="shrink-0 text-brand" />}
+                  </button>
+
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMagnet(s.magnet, s.id)}
+                      title="Copy magnet URL"
+                      className="p-1.5 rounded hover:bg-white/10 text-muted hover:text-white transition cursor-pointer"
+                    >
+                      {copiedSourceId === s.id ? (
+                        <Check size={14} className="text-emerald-400" />
+                      ) : (
+                        <Copy size={14} />
+                      )}
+                    </button>
+                    <a
+                      href={s.magnet}
+                      title="Download magnet in external client"
+                      className="p-1.5 rounded hover:bg-white/10 text-muted hover:text-brand transition"
+                    >
+                      <Magnet size={14} />
+                    </a>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -933,6 +982,29 @@ export default function PlayerOverlay({
             >
               {selected?.quality?.toUpperCase() ?? "AUTO"}
             </button>
+            {selected?.magnet && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleCopyMagnet(selected.magnet, "player-current")}
+                  className="hover:text-brand p-1 text-muted transition"
+                  title={copiedSourceId === "player-current" ? "Copied magnet URL!" : "Copy magnet link"}
+                >
+                  {copiedSourceId === "player-current" ? (
+                    <Check size={20} className="text-emerald-400" />
+                  ) : (
+                    <Copy size={20} />
+                  )}
+                </button>
+                <a
+                  href={selected.magnet}
+                  className="hover:text-brand p-1 text-muted transition"
+                  title="Download magnet in external client"
+                >
+                  <Magnet size={20} />
+                </a>
+              </div>
+            )}
             <button onClick={toggleFullscreen} aria-label="Fullscreen" className="hover:text-brand">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />

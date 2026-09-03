@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CircleHelp, Play, Plus, Star, Download, X } from "lucide-react";
+import { Check, CircleHelp, Play, Plus, Star, Download, X, Copy, Magnet } from "lucide-react";
 import { cn, tmdbImg, playabilityRank, qualityRank } from "@/lib/utils";
 import type { EpisodeItem, MediaItem, PlayTarget, TorrentResult } from "@/lib/types";
 import type { MediaDetails } from "@/lib/tmdb";
@@ -63,6 +63,27 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   const [downloadModalTarget, setDownloadModalTarget] = useState<PlayTarget | null>(null);
   const [downloadSources, setDownloadSources] = useState<TorrentResult[] | null>(null);
   const [activeDownloads, setActiveDownloads] = useState<any[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  async function handleCopyMagnet(magnet: string, id: string) {
+    if (!magnet) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(magnet);
+      } else {
+        const el = document.createElement("textarea");
+        el.value = magnet;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy magnet:", err);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -523,23 +544,74 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                 <X size={20} />
               </button>
             </div>
-            <div className="overflow-y-auto p-2">
+            <div className="overflow-y-auto p-3 space-y-2">
               {downloadSources.map((s) => (
-                <button
+                <div
                   key={s.id}
-                  onClick={() => confirmDownload(downloadModalTarget, s)}
-                  className="flex w-full items-center gap-3 rounded p-3 text-left hover:bg-elevated-hover transition"
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/[0.03] p-3 transition hover:border-white/10 hover:bg-white/[0.06]"
                 >
-                  <span className="w-14 shrink-0 text-xs font-bold text-brand text-center">
-                    {s.quality}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm text-white/90 font-medium">
-                    {s.name}
-                  </span>
-                  <span className="shrink-0 text-xs text-muted whitespace-nowrap">
-                    {s.size ? `${s.size} · ` : ""}👤 {s.seeds}
-                  </span>
-                </button>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded bg-brand/20 px-2 py-0.5 text-xs font-bold text-brand">
+                        {s.quality}
+                      </span>
+                      {s.source === "yts" && (
+                        <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">
+                          Web Optimized
+                        </span>
+                      )}
+                      <span className="text-xs text-muted">
+                        {s.size ? `${s.size} · ` : ""}👤 {s.seeds} seeders
+                      </span>
+                    </div>
+                    <span className="truncate text-xs font-medium text-white/90" title={s.name}>
+                      {s.name}
+                    </span>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/* Copy Magnet URL */}
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMagnet(s.magnet, s.id)}
+                      title="Copy magnet link to clipboard"
+                      className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white cursor-pointer"
+                    >
+                      {copiedId === s.id ? (
+                        <>
+                          <Check size={13} className="text-emerald-400" />
+                          <span className="text-emerald-400 font-semibold">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={13} />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Open / Download Magnet in default BitTorrent app */}
+                    <a
+                      href={s.magnet}
+                      title="Download magnet in external BitTorrent app (qBittorrent, etc.)"
+                      className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-white/80 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+                    >
+                      <Magnet size={13} className="text-brand" />
+                      <span>Magnet</span>
+                    </a>
+
+                    {/* In-app download to ~/Downloads/TorrentFlix */}
+                    <button
+                      type="button"
+                      onClick={() => confirmDownload(downloadModalTarget, s)}
+                      title="Download within TorrentFlix"
+                      className="flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-bold text-white shadow transition hover:bg-brand/90 active:scale-95 cursor-pointer"
+                    >
+                      <Download size={13} />
+                      <span>Download</span>
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           </div>

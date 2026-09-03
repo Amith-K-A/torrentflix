@@ -52,7 +52,7 @@ __pycache__/
 *.bin
 
 # local torrents & downloads
-downloads/
+/downloads/
 .downloads.json
 
 # ide & scratch
