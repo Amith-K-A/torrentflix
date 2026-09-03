@@ -11,6 +11,7 @@ import { useWatchedEpisodes, useWatchlist, useProgressList } from "@/hooks/useSt
 import { getProgress, progressKey } from "@/lib/store";
 import PlayerOverlay from "./PlayerOverlay";
 import SeasonTabs from "./SeasonTabs";
+import MediaCard from "./MediaCard";
 
 export default function WatchView({ details }: { details: MediaDetails }) {
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
@@ -158,9 +159,55 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   const [downloadModalMode, setDownloadModalMode] = useState<"download" | "magnet">("download");
   const [downloadSources, setDownloadSources] = useState<TorrentResult[] | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [downloadedMagnetId, setDownloadedMagnetId] = useState<string | null>(null);
 
   const [sourcesCache] = useState<Record<string, TorrentResult[]>>({});
   const [quickLoading, setQuickLoading] = useState<string | null>(null);
+
+  function handleDownloadMagnetFile(magnet: string, filename: string, id: string) {
+    if (!magnet) return;
+
+    // 1. Download actual .magnet file to user's computer via browser download manager
+    try {
+      const cleanName = (filename || "torrent")
+        .replace(/[/\\?%*:|"<>]/g, "_")
+        .replace(/\s+/g, " ")
+        .trim();
+      const blob = new Blob([magnet.trim() + "\n"], { type: "text/plain;charset=utf-8" });
+      const blobUrl = URL.createObjectURL(blob);
+      const dlLink = document.createElement("a");
+      dlLink.href = blobUrl;
+      dlLink.download = `${cleanName}.magnet`;
+      document.body.appendChild(dlLink);
+      dlLink.click();
+      document.body.removeChild(dlLink);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    } catch (e) {
+      console.error("Failed to trigger magnet file download:", e);
+    }
+
+    // 2. Also invoke OS magnet: protocol silently via invisible iframe (doesn't open blank tabs)
+    try {
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = magnet;
+      document.body.appendChild(iframe);
+      setTimeout(() => {
+        try { document.body.removeChild(iframe); } catch {}
+      }, 3000);
+    } catch {}
+
+    // 3. Copy to clipboard as convenience
+    try {
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(magnet).catch(() => {});
+      }
+    } catch {}
+
+    // 4. Visual confirmation
+    setDownloadedMagnetId(id);
+    setTimeout(() => setDownloadedMagnetId(null), 3000);
+  }
 
   async function handleCopyMagnet(magnet: string, id: string) {
     if (!magnet) return;
@@ -435,37 +482,62 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   return (
     <div className="min-h-screen pb-16">
       {/* banner */}
-      <div className="relative h-[62vh] min-h-[420px] w-full">
+      <div className="relative h-[66vh] min-h-[460px] w-full">
         {backdrop && (
-          <Image src={backdrop} alt={details.title} fill priority sizes="100vw" className="object-cover object-top" />
+          <Image src={backdrop} alt={details.title} fill priority sizes="100vw" className="object-cover object-top brightness-90" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/95 via-black/50 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-surface to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-surface via-surface/85 sm:via-surface/75 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-surface via-surface/80 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/60" />
 
-        <div className="absolute bottom-[10%] left-4 right-4 max-w-5xl md:left-10 md:right-10">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted">
-            {details.type === "tv" ? "TV Series" : "Film"}
-          </p>
-          <h1 className="mt-1 text-3xl font-black leading-tight md:text-5xl">{details.title}</h1>
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-            {details.vote_average > 0 && (
-              <span className="flex items-center gap-1 font-semibold">
-                <Star size={14} className="fill-yellow-400 text-yellow-400" />
-                {details.vote_average.toFixed(1)}
+        <div className="absolute bottom-[8%] left-4 right-4 max-w-5xl md:left-10 md:right-10">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand/15 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-brand border border-brand/30">
+              <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" />
+              {details.type === "tv" ? "TV Series" : "Film"}
+            </span>
+            {details.status && (
+              <span className="text-xs font-medium text-white/50">
+                {details.status}
               </span>
             )}
-            {details.year && <span className="text-muted">{details.year}</span>}
-            {runtime && <span className="text-muted">{runtime}</span>}
-            {details.genres.slice(0, 3).map((g) => (
-              <span key={g.id} className="border border-white/30 px-2 py-0.5 text-xs text-muted">
+          </div>
+
+          <h1 className="mt-2.5 text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight drop-shadow-md">
+            {details.title}
+          </h1>
+
+          {details.tagline && (
+            <p className="mt-1.5 text-sm sm:text-base italic font-medium text-white/60">
+              &ldquo;{details.tagline}&rdquo;
+            </p>
+          )}
+
+          <div className="mt-3.5 flex flex-wrap items-center gap-2.5 sm:gap-3 text-sm">
+            {details.vote_average > 0 && (
+              <div className="flex items-center gap-1.5 rounded-md bg-amber-400/15 px-2.5 py-1 text-xs font-bold text-amber-300 border border-amber-400/30 shadow-sm">
+                <Star size={13} className="fill-amber-400 text-amber-400" />
+                {details.vote_average.toFixed(1)}
+              </div>
+            )}
+            {details.year && <span className="text-white/80 font-semibold text-sm">{details.year}</span>}
+            {runtime && <span className="text-white/70 font-medium text-sm">· {runtime}</span>}
+            <span className="rounded border border-white/20 bg-white/5 px-2 py-0.5 text-[11px] font-bold text-white/90">
+              4K UHD
+            </span>
+            {details.genres.map((g) => (
+              <span key={g.id} className="rounded-full border border-white/15 bg-white/10 px-3 py-0.5 text-xs font-medium text-white/90 backdrop-blur-sm hover:bg-white/20 transition">
                 {g.name}
               </span>
             ))}
           </div>
-          <p className="mt-3 line-clamp-3 max-w-xl text-sm text-white/85 md:text-base">
+
+          <p className="mt-4 line-clamp-3 max-w-2xl text-sm sm:text-base leading-relaxed text-white/80 md:line-clamp-4">
             {details.overview}
           </p>
+
           <div className="mt-6 flex flex-wrap items-center gap-2.5 sm:gap-3">
+            {/* Primary Play / Resume */}
             <button
               onClick={() =>
                 openPlay({
@@ -484,11 +556,13 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                     : {}),
                 })
               }
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-white px-6 text-sm font-bold text-black shadow-md transition hover:bg-white/90 active:scale-95 whitespace-nowrap cursor-pointer"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2.5 rounded-xl bg-white px-6 text-sm font-bold text-black shadow-lg shadow-white/10 transition hover:bg-white/90 hover:scale-[1.02] active:scale-95 whitespace-nowrap cursor-pointer"
             >
               <Play size={18} fill="currentColor" />
               <span>{currentEpisodeTarget.label}</span>
             </button>
+
+            {/* In-App Download */}
             <button
               onClick={() =>
                 openDownloadModal({
@@ -508,14 +582,55 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                 })
               }
               disabled={downloadingTarget !== null}
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-white active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur-md transition hover:bg-white/20 hover:text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
             >
               <Download size={18} />
               <span>
-                {downloadingTarget === (details.type === "tv" ? `S${currentEpisodeTarget.season}E${currentEpisodeTarget.episode}` : "movie") ? "Starting..." : "Download"}
+                {downloadingTarget === (details.type === "tv" ? `S${currentEpisodeTarget.season}E${currentEpisodeTarget.episode}` : "movie") ? "Starting..." : "In-App Download"}
               </span>
             </button>
-            {/* Direct Copy Magnet URL on Movie/Show Hero */}
+
+            {/* Direct Download Magnet */}
+            <button
+              type="button"
+              onClick={() =>
+                handleQuickDownloadMagnet(
+                  {
+                    type: details.type,
+                    tmdbId: details.id,
+                    imdbId: details.imdb_id,
+                    title: details.title,
+                    year: details.year,
+                    posterPath: details.poster_path,
+                    ...(details.type === "tv"
+                      ? {
+                          season: currentEpisodeTarget.season,
+                          episode: currentEpisodeTarget.episode,
+                          episodeName: currentEpisodeTarget.episodeName,
+                        }
+                      : {}),
+                  },
+                  "hero-download"
+                )
+              }
+              disabled={quickLoading !== null}
+              title="Select and download magnet file for external BitTorrent app"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-brand/40 bg-brand/15 px-5 text-sm font-semibold text-white backdrop-blur-md transition hover:bg-brand/25 hover:border-brand/60 hover:scale-[1.02] active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
+            >
+              {quickLoading === "hero-download" ? (
+                <>
+                  <Loader2 size={18} className="animate-spin text-brand" />
+                  <span>Finding...</span>
+                </>
+              ) : (
+                <>
+                  <Magnet size={18} className="text-brand" />
+                  <span>Download Magnet</span>
+                </>
+              )}
+            </button>
+
+            {/* Direct Copy Magnet URL */}
             <button
               type="button"
               onClick={() =>
@@ -540,7 +655,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
               }
               disabled={quickLoading !== null}
               title="Copy magnet link of best source to clipboard"
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-white active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 text-sm font-semibold text-white/90 backdrop-blur-md transition hover:bg-white/20 hover:text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
             >
               {copiedId === "hero-copy" ? (
                 <>
@@ -554,55 +669,18 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                 </>
               ) : (
                 <>
-                  <Copy size={18} />
+                  <Copy size={17} />
                   <span>Copy Magnet</span>
                 </>
               )}
             </button>
-            {/* Direct Download Magnet on Movie/Show Hero */}
-            <button
-              type="button"
-              onClick={() =>
-                handleQuickDownloadMagnet(
-                  {
-                    type: details.type,
-                    tmdbId: details.id,
-                    imdbId: details.imdb_id,
-                    title: details.title,
-                    year: details.year,
-                    posterPath: details.poster_path,
-                    ...(details.type === "tv"
-                      ? {
-                          season: currentEpisodeTarget.season,
-                          episode: currentEpisodeTarget.episode,
-                          episodeName: currentEpisodeTarget.episodeName,
-                        }
-                      : {}),
-                  },
-                  "hero-download"
-                )
-              }
-              disabled={quickLoading !== null}
-              title="Select and download magnet link in external BitTorrent app"
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-brand active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
-            >
-              {quickLoading === "hero-download" ? (
-                <>
-                  <Loader2 size={18} className="animate-spin text-brand" />
-                  <span>Fetching...</span>
-                </>
-              ) : (
-                <>
-                  <Magnet size={18} className="text-brand" />
-                  <span>Download Magnet</span>
-                </>
-              )}
-            </button>
+
+            {/* My List */}
             <button
               onClick={() => toggle(mediaItem)}
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-white active:scale-95 whitespace-nowrap cursor-pointer"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 text-sm font-semibold text-white/90 backdrop-blur-md transition hover:bg-white/20 hover:text-white hover:scale-[1.02] active:scale-95 whitespace-nowrap cursor-pointer"
             >
-              {mounted && has(mediaItem) ? <Check size={18} /> : <Plus size={18} />}
+              {mounted && has(mediaItem) ? <Check size={18} className="text-emerald-400" /> : <Plus size={18} />}
               <span>{mounted && has(mediaItem) ? "In My List" : "My List"}</span>
             </button>
           </div>
@@ -795,36 +873,87 @@ export default function WatchView({ details }: { details: MediaDetails }) {
         </div>
       )}
 
-      {/* movie info panel */}
-      {details.type === "movie" && (
-        <div className="mt-8 px-4 md:px-10">
-          <div className="grid gap-6 rounded-lg border border-white/10 bg-elevated/50 p-5 md:grid-cols-3">
+      {/* Rich details: Top Cast, Specs, and More Like This */}
+      <div className="mt-10 px-4 md:px-10 space-y-10">
+        {/* Top Cast */}
+        {details.cast && details.cast.length > 0 && (
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">Top Cast</h2>
+            <div className="mt-4 flex gap-4 overflow-x-auto pb-3 pt-1 scrollbar-none">
+              {details.cast.map((actor) => {
+                const photo = tmdbImg(actor.profile_path, "w185");
+                return (
+                  <div key={actor.id} className="flex flex-col items-center shrink-0 w-24 sm:w-28 text-center group">
+                    <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border border-white/15 bg-white/5 transition-transform group-hover:scale-105 shadow-md">
+                      {photo ? (
+                        <Image src={photo} alt={actor.name} fill sizes="96px" className="object-cover" />
+                      ) : (
+                        <div className="grid h-full place-items-center bg-white/10 text-lg font-bold text-white/50">
+                          {actor.name.charAt(0)}
+                        </div>
+                      )}
+                    </div>
+                    <p className="mt-2.5 text-xs sm:text-sm font-semibold text-white/95 line-clamp-1 group-hover:text-brand transition">
+                      {actor.name}
+                    </p>
+                    <p className="text-[11px] text-muted line-clamp-1">
+                      {actor.character}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Media Details & Specifications */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 sm:p-6 backdrop-blur-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
             <div>
-              <h3 className="text-sm font-semibold text-muted">About</h3>
-              <p className="mt-2 text-sm leading-relaxed text-white/80">{details.overview}</p>
-              {details.tagline && <p className="mt-2 text-xs italic text-muted">“{details.tagline}”</p>}
+              <span className="text-xs uppercase tracking-wider text-muted font-medium">Released</span>
+              <p className="mt-1 text-sm font-semibold text-white/90">
+                {details.release_date || details.year || "Unknown"}
+              </p>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-muted">Genres</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {details.genres.map((g) => (
-                  <span key={g.id} className="rounded-full bg-white/10 px-3 py-1 text-xs">
-                    {g.name}
-                  </span>
-                ))}
-              </div>
+              <span className="text-xs uppercase tracking-wider text-muted font-medium">Status</span>
+              <p className="mt-1 text-sm font-semibold text-white/90">
+                {details.status || "Released"}
+              </p>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-muted">How streaming works</h3>
-              <p className="mt-2 flex items-start gap-2 text-xs leading-relaxed text-muted">
-                <CircleHelp size={14} className="mt-0.5 shrink-0" />
-                The torrent is fetched peer-to-peer by your local server and played while
-                it downloads. Nothing is stored permanently.
+              <span className="text-xs uppercase tracking-wider text-muted font-medium">Director / Creator</span>
+              <p className="mt-1 text-sm font-semibold text-white/90 truncate">
+                {details.directors?.length ? details.directors.join(", ") : "Various"}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs uppercase tracking-wider text-muted font-medium">Streaming Info</span>
+              <p className="mt-1 text-sm font-semibold text-emerald-400 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                4K / 1080p P2P Instant
               </p>
             </div>
           </div>
+
+          <div className="mt-5 pt-4 border-t border-white/5 flex items-center gap-2 text-xs text-muted">
+            <CircleHelp size={14} className="shrink-0 text-muted/70" />
+            <span>The torrent is fetched peer-to-peer by your local server and streamed in real-time. No permanent storage required.</span>
+          </div>
         </div>
-      )}
+
+        {/* More Like This / Recommendations */}
+        {details.recommendations && details.recommendations.length > 0 && (
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">More Like This</h2>
+            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+              {details.recommendations.map((item) => (
+                <MediaCard key={item.id} item={item} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {target && (
         <PlayerOverlay target={target} startPosition={startPosition} onClose={closePlay} />
@@ -834,7 +963,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
       {downloadModalTarget && downloadSources && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4" onClick={() => setDownloadModalTarget(null)}>
           <div 
-            className="w-full max-w-2xl lg:max-w-3xl rounded-2xl border border-white/15 bg-surface/95 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            className="w-full max-w-3xl lg:max-w-4xl rounded-2xl border border-white/15 bg-surface/95 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4 bg-white/[0.02]">
@@ -860,29 +989,36 @@ export default function WatchView({ details }: { details: MediaDetails }) {
               </button>
             </div>
             
-            <div className="overflow-y-auto p-4 sm:p-5 space-y-3">
+            <div className="overflow-y-auto px-6 py-4 space-y-3">
               {downloadSources.map((s) => (
                 <div
                   key={s.id}
-                  className="flex flex-col gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] p-4 transition hover:border-white/20 hover:bg-white/[0.06]"
+                  className="flex flex-col rounded-xl border border-white/10 bg-white/[0.03] transition hover:border-white/20 hover:bg-white/[0.06] overflow-hidden"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Content: Release Name + Metadata Badges */}
+                  <div className="p-4 flex flex-col gap-2.5">
+                    {/* 1. Torrent Release Name */}
+                    <div className="text-sm font-semibold text-white/95 leading-snug break-words select-all">
+                      {s.name}
+                    </div>
+
+                    {/* 2. Metadata Badges */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md bg-brand/20 px-2.5 py-1 text-xs font-bold text-brand border border-brand/30">
+                      <span className="rounded bg-brand/20 px-2.5 py-0.5 text-xs font-bold text-brand border border-brand/30">
                         {s.quality}
                       </span>
                       {s.source === "yts" && (
-                        <span className="rounded-md bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 border border-emerald-500/25">
+                        <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-400 border border-emerald-500/25">
                           Web Optimized
                         </span>
                       )}
                       {s.size && (
-                        <span className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/90">
+                        <span className="rounded border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-medium text-white/90">
                           {s.size}
                         </span>
                       )}
                       <span className={cn(
-                        "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border",
+                        "flex items-center gap-1.5 rounded px-2.5 py-0.5 text-xs font-semibold border",
                         s.seeds > 0
                           ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
                           : "border-white/10 bg-white/5 text-muted"
@@ -890,70 +1026,78 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                         {s.seeds} seeders
                       </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* Copy Magnet URL */}
-                      <button
-                        type="button"
-                        onClick={() => handleCopyMagnet(s.magnet, s.id)}
-                        title="Copy magnet link to clipboard"
-                        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-medium text-white/80 transition hover:border-white/30 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95"
-                      >
-                        {copiedId === s.id ? (
-                          <>
-                            <Check size={14} className="text-emerald-400" />
-                            <span className="text-emerald-400 font-semibold">Copied!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={14} />
-                            <span>Copy</span>
-                          </>
-                        )}
-                      </button>
-
-                      {/* Download Magnet Link: Real anchor tag so browser / OS protocol handler receives it reliably */}
-                      <a
-                        href={s.magnet}
-                        onClick={() => {
-                          handleCopyMagnet(s.magnet, s.id);
-                          setTimeout(() => setDownloadModalTarget(null), 1500);
-                        }}
-                        title="Open magnet in external BitTorrent app (qBittorrent, etc.)"
-                        className={cn(
-                          "inline-flex h-9 items-center gap-1.5 rounded-lg px-4 text-xs font-bold transition cursor-pointer active:scale-95 whitespace-nowrap",
-                          downloadModalMode === "magnet"
-                            ? "bg-brand text-white shadow-lg shadow-brand/25 hover:bg-brand/90 hover:brightness-110"
-                            : "border border-white/15 bg-white/5 text-white/90 hover:border-white/30 hover:bg-white/10 hover:text-white"
-                        )}
-                      >
-                        <Magnet size={14} className={downloadModalMode === "magnet" ? "text-white" : "text-brand"} />
-                        <span>{downloadModalMode === "magnet" ? "Download Magnet" : "Magnet"}</span>
-                      </a>
-
-                      {/* In-app download to ~/Downloads/TorrentFlix */}
-                      <button
-                        type="button"
-                        onClick={() => confirmDownload(downloadModalTarget, s)}
-                        title="Download within TorrentFlix"
-                        className={cn(
-                          "inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-bold transition cursor-pointer active:scale-95 whitespace-nowrap",
-                          downloadModalMode === "download"
-                            ? "bg-brand text-white shadow-lg shadow-brand/25 hover:bg-brand/90 hover:brightness-110"
-                            : "border border-white/15 bg-white/5 text-white/80 hover:border-white/30 hover:bg-white/10 hover:text-white"
-                        )}
-                      >
-                        <Download size={14} />
-                        <span>{downloadModalMode === "magnet" ? "In-App" : "Download"}</span>
-                      </button>
+                      {s.source && (
+                        <span className="text-[11px] uppercase tracking-wider text-muted/70 font-mono">
+                          {s.source}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  {/* Torrent File / Release Name: Full name completely visible without ellipsis or background */}
-                  <p className="text-xs text-white/75 font-mono break-words leading-relaxed select-all">
-                    {s.name}
-                  </p>
+                  {/* 3. Action Buttons: Perfectly equal padding above and below */}
+                  <div className="px-4 py-2.5 bg-white/[0.02] border-t border-white/[0.07] flex items-center justify-end gap-2">
+                    {/* Copy Magnet Link */}
+                    <button
+                      type="button"
+                      onClick={() => handleCopyMagnet(s.magnet, s.id)}
+                      title="Copy magnet link to clipboard"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-medium text-white/80 transition hover:border-white/30 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95"
+                    >
+                      {copiedId === s.id ? (
+                        <>
+                          <Check size={13} className="text-emerald-400" />
+                          <span className="text-emerald-400 font-semibold">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={13} />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Download Magnet / Torrent File */}
+                    <a
+                      href={`/api/torrents/download?magnet=${encodeURIComponent(s.magnet)}&name=${encodeURIComponent(s.name)}&hash=${s.infoHash || s.id}`}
+                      download
+                      onClick={() => handleDownloadMagnetFile(s.magnet, s.name, s.id)}
+                      title="Download torrent/magnet file to your computer"
+                      className={cn(
+                        "inline-flex h-8 items-center gap-1.5 rounded-lg px-4 text-xs font-bold transition cursor-pointer active:scale-95 whitespace-nowrap",
+                        downloadModalMode === "magnet"
+                          ? "bg-brand text-white shadow-lg shadow-brand/25 hover:bg-brand/90 hover:brightness-110"
+                          : "border border-white/15 bg-white/5 text-white/90 hover:border-white/30 hover:bg-white/10 hover:text-white"
+                      )}
+                    >
+                      {downloadedMagnetId === s.id ? (
+                        <>
+                          <Check size={13} className="text-emerald-400" />
+                          <span className="text-emerald-400 font-semibold">Downloaded!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Magnet size={13} className={downloadModalMode === "magnet" ? "text-white" : "text-brand"} />
+                          <span>{downloadModalMode === "magnet" ? "Download Magnet" : "Magnet"}</span>
+                        </>
+                      )}
+                    </a>
+
+                    {/* In-app download to ~/Downloads/TorrentFlix */}
+                    <button
+                      type="button"
+                      onClick={() => confirmDownload(downloadModalTarget, s)}
+                      title="Download video file inside TorrentFlix"
+                      className={cn(
+                        "inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition cursor-pointer active:scale-95 whitespace-nowrap",
+                        downloadModalMode === "download"
+                          ? "bg-brand text-white shadow-lg shadow-brand/25 hover:bg-brand/90 hover:brightness-110 font-bold"
+                          : "border border-white/15 bg-white/5 text-white/80 hover:border-white/30 hover:bg-white/10 hover:text-white"
+                      )}
+                    >
+                      <Download size={13} />
+                      <span>{downloadModalMode === "magnet" ? "In-App" : "Download"}</span>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

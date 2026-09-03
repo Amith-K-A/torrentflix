@@ -85,6 +85,13 @@ export async function searchMulti(query: string): Promise<MediaItem[]> {
     .map((r) => normalizeMedia(r));
 }
 
+export interface CastMember {
+  id: number;
+  name: string;
+  character: string;
+  profile_path: string | null;
+}
+
 export interface MediaDetails {
   id: number;
   type: MediaType;
@@ -93,7 +100,9 @@ export interface MediaDetails {
   poster_path: string | null;
   backdrop_path: string | null;
   vote_average: number;
+  vote_count?: number;
   year: string | null;
+  release_date?: string | null;
   genres: { id: number; name: string }[];
   runtime: number | null;
   episode_run_time: number[];
@@ -102,13 +111,39 @@ export interface MediaDetails {
   imdb_id: string | null;
   tagline: string | null;
   status: string;
+  cast?: CastMember[];
+  directors?: string[];
+  recommendations?: MediaItem[];
 }
 
 export async function getDetails(type: MediaType, id: string | number): Promise<MediaDetails> {
   const [details, ext] = await Promise.all([
-    tmdb<any>(`/${type}/${id}`),
+    tmdb<any>(`/${type}/${id}`, { append_to_response: "credits,recommendations,similar" }),
     tmdb<any>(`/${type}/${id}/external_ids`).catch(() => ({ imdb_id: null })),
   ]);
+
+  const cast: CastMember[] = (details.credits?.cast || [])
+    .slice(0, 10)
+    .map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      character: c.character || "",
+      profile_path: c.profile_path || null,
+    }));
+
+  const directors: string[] = (details.credits?.crew || [])
+    .filter((cr: any) => cr.job === "Director" || cr.job === "Creator" || (type === "tv" && cr.job === "Executive Producer"))
+    .slice(0, 3)
+    .map((cr: any) => cr.name);
+
+  const rawRecs = details.recommendations?.results?.length
+    ? details.recommendations.results
+    : details.similar?.results || [];
+
+  const recommendations: MediaItem[] = rawRecs
+    .slice(0, 12)
+    .map((r: any) => normalizeMedia(r, type));
+
   return {
     id: details.id,
     type,
@@ -117,7 +152,9 @@ export async function getDetails(type: MediaType, id: string | number): Promise<
     poster_path: details.poster_path ?? null,
     backdrop_path: details.backdrop_path ?? null,
     vote_average: details.vote_average ?? 0,
+    vote_count: details.vote_count ?? 0,
     year: (details.release_date || details.first_air_date || "").slice(0, 4) || null,
+    release_date: details.release_date || details.first_air_date || null,
     genres: details.genres ?? [],
     runtime: details.runtime ?? null,
     episode_run_time: details.episode_run_time ?? [],
@@ -134,6 +171,9 @@ export async function getDetails(type: MediaType, id: string | number): Promise<
     imdb_id: ext.imdb_id ?? null,
     tagline: details.tagline ?? null,
     status: details.status ?? "",
+    cast,
+    directors,
+    recommendations,
   };
 }
 

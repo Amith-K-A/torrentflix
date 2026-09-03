@@ -457,10 +457,30 @@ export default function PlayerOverlay({
   }, [persist]);
 
   function toggleFullscreen() {
-    const el = containerRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) document.exitFullscreen();
-    else el.requestFullscreen().catch(() => {});
+    const v = videoRef.current;
+
+    // Check if already fullscreen (with webkit prefix fallback)
+    const fsEl = document.fullscreenElement ?? (document as any).webkitFullscreenElement;
+    if (fsEl) {
+      if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen();
+      return;
+    }
+
+    // Try document.documentElement first (most reliable on desktop browsers)
+    const root = document.documentElement;
+    if (root.requestFullscreen) {
+      root.requestFullscreen().catch((err) => {
+        console.warn("Fullscreen failed on documentElement:", err);
+        // Fallback: try video element directly (iOS Safari)
+        if (v && (v as any).webkitEnterFullscreen) (v as any).webkitEnterFullscreen();
+      });
+    } else if ((root as any).webkitRequestFullscreen) {
+      (root as any).webkitRequestFullscreen();
+    } else if (v && (v as any).webkitEnterFullscreen) {
+      // iOS Safari — only supports video-native fullscreen
+      (v as any).webkitEnterFullscreen();
+    }
   }
 
   /**
@@ -567,9 +587,12 @@ export default function PlayerOverlay({
   return (
     <div
       ref={containerRef}
-      onMouseMove={nudgeControls}
+      onMouseMove={handleMouseMove}
       onClick={nudgeControls}
-      className="fixed inset-0 z-50 flex select-none items-center justify-center overflow-hidden bg-black"
+      className={cn(
+        "fixed inset-0 z-50 flex select-none items-center justify-center overflow-hidden bg-black transition-all",
+        !controlsVisible && playing && !pickerOpen && "cursor-none [&_*]:cursor-none"
+      )}
     >
       {/* video element */}
       {streamUrl && (
@@ -765,7 +788,7 @@ export default function PlayerOverlay({
       <div
         className={cn(
           "absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/80 to-transparent p-4 transition-opacity",
-          controlsVisible ? "opacity-100" : "opacity-0"
+          controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
       >
         <button
@@ -910,7 +933,7 @@ export default function PlayerOverlay({
       <div
         className={cn(
           "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-4 pb-4 pt-16 transition-opacity",
-          controlsVisible ? "opacity-100" : "opacity-0"
+          controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
         onClick={(e) => e.stopPropagation()}
       >
