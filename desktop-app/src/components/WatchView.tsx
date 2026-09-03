@@ -263,7 +263,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
         <div className="absolute inset-0 bg-gradient-to-r from-black/95 via-black/50 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-surface to-transparent" />
 
-        <div className="absolute bottom-[12%] left-4 max-w-2xl md:left-10">
+        <div className="absolute bottom-[10%] left-4 right-4 max-w-5xl md:left-10 md:right-10">
           <p className="text-xs font-semibold uppercase tracking-widest text-muted">
             {details.type === "tv" ? "TV Series" : "Film"}
           </p>
@@ -286,7 +286,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
           <p className="mt-3 line-clamp-3 max-w-xl text-sm text-white/85 md:text-base">
             {details.overview}
           </p>
-          <div className="mt-5 flex items-center gap-3">
+          <div className="mt-6 flex flex-wrap items-center gap-2.5 sm:gap-3">
             <button
               onClick={() =>
                 openPlay({
@@ -299,10 +299,10 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                   ...(details.type === "tv" ? { season: 1, episode: 1 } : {}),
                 })
               }
-              className="flex items-center gap-2 rounded bg-white px-7 py-2.5 text-sm font-bold text-black transition hover:bg-white/80"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-white px-6 text-sm font-bold text-black shadow-md transition hover:bg-white/90 active:scale-95 whitespace-nowrap cursor-pointer"
             >
               <Play size={18} fill="currentColor" />
-              {details.type === "movie" ? "Stream Now" : "Play S1 E1"}
+              <span>{details.type === "movie" ? "Stream Now" : "Play S1 E1"}</span>
             </button>
             <button
               onClick={() =>
@@ -317,10 +317,10 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                 })
               }
               disabled={downloadingTarget !== null}
-              className="flex items-center gap-2 rounded bg-white/20 px-6 py-2.5 text-sm font-bold transition hover:bg-white/30 disabled:opacity-50 cursor-pointer"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-white active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
             >
               <Download size={18} />
-              {downloadingTarget === (details.type === "tv" ? "S1E1" : "movie") ? "Starting..." : "Download"}
+              <span>{downloadingTarget === (details.type === "tv" ? "S1E1" : "movie") ? "Starting..." : "Download"}</span>
             </button>
             {/* Direct Copy Magnet URL on Movie/Show Hero */}
             <button
@@ -341,7 +341,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
               }
               disabled={quickLoading !== null}
               title="Copy magnet link of best source to clipboard"
-              className="flex items-center gap-2 rounded bg-white/15 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/25 disabled:opacity-50 cursor-pointer"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-white active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
             >
               {copiedId === "hero-copy" ? (
                 <>
@@ -379,7 +379,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
               }
               disabled={quickLoading !== null}
               title="Open magnet link in external BitTorrent app (qBittorrent, etc.)"
-              className="flex items-center gap-2 rounded bg-white/15 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/25 hover:text-brand disabled:opacity-50 cursor-pointer"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-4 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-brand active:scale-95 disabled:opacity-50 whitespace-nowrap cursor-pointer"
             >
               {quickLoading === "hero-download" ? (
                 <>
@@ -395,10 +395,10 @@ export default function WatchView({ details }: { details: MediaDetails }) {
             </button>
             <button
               onClick={() => toggle(mediaItem)}
-              className="flex items-center gap-2 rounded bg-white/25 px-6 py-2.5 text-sm font-semibold backdrop-blur transition hover:bg-white/15"
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/10 px-5 text-sm font-semibold text-white/90 backdrop-blur transition hover:bg-white/20 hover:text-white active:scale-95 whitespace-nowrap cursor-pointer"
             >
               {mounted && has(mediaItem) ? <Check size={18} /> : <Plus size={18} />}
-              {mounted && has(mediaItem) ? "In My List" : "My List"}
+              <span>{mounted && has(mediaItem) ? "In My List" : "My List"}</span>
             </button>
           </div>
         </div>
@@ -468,96 +468,98 @@ export default function WatchView({ details }: { details: MediaDetails }) {
                               {ep.air_date ? ` · ${ep.air_date}` : ""}
                             </p>
                           </div>
-                          <button
-                            onClick={() => toggleEpisode(ep.season_number, ep.episode_number)}
-                            title={watched ? "Mark unwatched" : "Mark watched"}
-                            className={cn(
-                              "shrink-0 rounded-full border p-1.5 transition",
-                              watched
-                                ? "border-brand bg-brand text-white"
-                                : "border-white/30 text-muted hover:border-white hover:text-white"
-                            )}
-                          >
-                            <Check size={13} />
-                          </button>
-                          <button
-                            onClick={() => openDownloadModal({
-                              type: "tv",
-                              tmdbId: details.id,
-                              imdbId: details.imdb_id,
-                              title: details.title,
-                              year: details.year,
-                              season: ep.season_number,
-                              episode: ep.episode_number,
-                              episodeName: ep.name,
-                              posterPath: details.poster_path,
-                            })}
-                            disabled={downloadingTarget !== null}
-                            title="Download episode"
-                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-white hover:text-white disabled:opacity-50 cursor-pointer"
-                          >
-                            <Download size={13} />
-                          </button>
-                          {/* Copy Magnet URL for episode */}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleQuickCopyMagnet(
-                                {
-                                  type: "tv",
-                                  tmdbId: details.id,
-                                  imdbId: details.imdb_id,
-                                  title: details.title,
-                                  year: details.year,
-                                  season: ep.season_number,
-                                  episode: ep.episode_number,
-                                  episodeName: ep.name,
-                                  posterPath: details.poster_path,
-                                },
-                                `ep-${ep.episode_number}-copy`
-                              )
-                            }
-                            disabled={quickLoading !== null}
-                            title="Copy magnet URL for this episode"
-                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-white hover:text-white disabled:opacity-50 cursor-pointer"
-                          >
-                            {copiedId === `ep-${ep.episode_number}-copy` ? (
-                              <Check size={13} className="text-emerald-400" />
-                            ) : quickLoading === `ep-${ep.episode_number}-copy` ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                              <Copy size={13} />
-                            )}
-                          </button>
-                          {/* Download Magnet for episode in external client */}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleQuickDownloadMagnet(
-                                {
-                                  type: "tv",
-                                  tmdbId: details.id,
-                                  imdbId: details.imdb_id,
-                                  title: details.title,
-                                  year: details.year,
-                                  season: ep.season_number,
-                                  episode: ep.episode_number,
-                                  episodeName: ep.name,
-                                  posterPath: details.poster_path,
-                                },
-                                `ep-${ep.episode_number}-download`
-                              )
-                            }
-                            disabled={quickLoading !== null}
-                            title="Open / Download magnet in external BitTorrent client"
-                            className="shrink-0 rounded-full border border-white/30 p-1.5 text-muted transition hover:border-brand hover:text-brand disabled:opacity-50 cursor-pointer"
-                          >
-                            {quickLoading === `ep-${ep.episode_number}-download` ? (
-                              <Loader2 size={13} className="animate-spin text-brand" />
-                            ) : (
-                              <Magnet size={13} className="text-brand" />
-                            )}
-                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => toggleEpisode(ep.season_number, ep.episode_number)}
+                              title={watched ? "Mark unwatched" : "Mark watched"}
+                              className={cn(
+                                "inline-flex h-8 w-8 items-center justify-center rounded-full border transition cursor-pointer",
+                                watched
+                                  ? "border-brand bg-brand text-white"
+                                  : "border-white/20 bg-white/5 text-muted hover:border-white hover:text-white hover:bg-white/10"
+                              )}
+                            >
+                              <Check size={13} />
+                            </button>
+                            <button
+                              onClick={() => openDownloadModal({
+                                type: "tv",
+                                tmdbId: details.id,
+                                imdbId: details.imdb_id,
+                                title: details.title,
+                                year: details.year,
+                                season: ep.season_number,
+                                episode: ep.episode_number,
+                                episodeName: ep.name,
+                                posterPath: details.poster_path,
+                              })}
+                              disabled={downloadingTarget !== null}
+                              title="Download episode"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5 text-muted transition hover:border-white hover:text-white hover:bg-white/10 disabled:opacity-50 cursor-pointer"
+                            >
+                              <Download size={13} />
+                            </button>
+                            {/* Copy Magnet URL for episode */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleQuickCopyMagnet(
+                                  {
+                                    type: "tv",
+                                    tmdbId: details.id,
+                                    imdbId: details.imdb_id,
+                                    title: details.title,
+                                    year: details.year,
+                                    season: ep.season_number,
+                                    episode: ep.episode_number,
+                                    episodeName: ep.name,
+                                    posterPath: details.poster_path,
+                                  },
+                                  `ep-${ep.episode_number}-copy`
+                                )
+                              }
+                              disabled={quickLoading !== null}
+                              title="Copy magnet URL for this episode"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5 text-muted transition hover:border-white hover:text-white hover:bg-white/10 disabled:opacity-50 cursor-pointer"
+                            >
+                              {copiedId === `ep-${ep.episode_number}-copy` ? (
+                                <Check size={13} className="text-emerald-400" />
+                              ) : quickLoading === `ep-${ep.episode_number}-copy` ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <Copy size={13} />
+                              )}
+                            </button>
+                            {/* Download Magnet for episode in external client */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleQuickDownloadMagnet(
+                                  {
+                                    type: "tv",
+                                    tmdbId: details.id,
+                                    imdbId: details.imdb_id,
+                                    title: details.title,
+                                    year: details.year,
+                                    season: ep.season_number,
+                                    episode: ep.episode_number,
+                                    episodeName: ep.name,
+                                    posterPath: details.poster_path,
+                                  },
+                                  `ep-${ep.episode_number}-download`
+                                )
+                              }
+                              disabled={quickLoading !== null}
+                              title="Open / Download magnet in external BitTorrent client"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/5 text-muted transition hover:border-brand hover:text-brand hover:bg-white/10 disabled:opacity-50 cursor-pointer"
+                            >
+                              {quickLoading === `ep-${ep.episode_number}-download` ? (
+                                <Loader2 size={13} className="animate-spin text-brand" />
+                              ) : (
+                                <Magnet size={13} className="text-brand" />
+                              )}
+                            </button>
+                          </div>
                         </div>
                         <p
                           className={cn(
