@@ -6,7 +6,7 @@
  * torrents alive and reclaims idle ones.
  */
 import { fileIsBrowserSafe, fileIsVideo } from "./utils";
-import { TRACKERS } from "./trackers";
+import { TRACKERS, DHT_BOOTSTRAP_NODES } from "./trackers";
 import path from "path";
 import os from "os";
 import fs from "fs";
@@ -108,6 +108,13 @@ export async function getClient(): Promise<AnyClient> {
       maxConns: 500,
       downloadLimit: -1,
       uploadLimit: -1,
+      dht: { bootstrap: DHT_BOOTSTRAP_NODES },
+      natUpnp: true,
+      natPmp: true,
+      utp: true,
+      utPex: true,
+      lsd: true,
+      seedOutgoingConnections: true,
     });
     globalThis.__wtAccess = new Map();
     if (!globalThis.__wtDownloads) {
@@ -231,14 +238,14 @@ export function prioritizeStreamRange(file: AnyTorrent, startByte: number, endBy
     } catch {}
   }
 
-  // Immediate critical pieces for instant playback: next 5-8 pieces (~10-15MB)
-  const criticalAhead = Math.min(endPiece, startPiece + 6);
+  // Immediate critical pieces for instant playback: next 8 pieces (~16MB)
+  const criticalAhead = Math.min(endPiece, startPiece + 8);
   try {
     torrent.critical(startPiece, criticalAhead);
   } catch {}
 
-  // Readahead buffer window: next 30-40 pieces (~50-80MB) with high priority
-  const bufferAhead = Math.min(endPiece, startPiece + 35);
+  // Readahead buffer window: next 55 pieces (~80-120MB) with high priority
+  const bufferAhead = Math.min(endPiece, startPiece + 55);
   try {
     torrent.select(startPiece, bufferAhead, 100);
   } catch {}
@@ -336,7 +343,13 @@ export async function startTorrent(magnet: string, opts: StartOptions = {}): Pro
   // v3 returns a Promise from get()
   let torrent: AnyTorrent | null = await client.get(magnet);
   if (!torrent) {
-    torrent = client.add(magnet, { path: downloadsPath, announce: TRACKERS });
+    torrent = client.add(magnet, {
+      path: downloadsPath,
+      announce: TRACKERS,
+      maxConns: 200,
+      uploads: 20,
+      storeCacheSlots: 100,
+    });
     evictIfNeeded(client);
   }
   touch(torrent.infoHash);
@@ -736,7 +749,13 @@ export async function startDownload(
   let isNew = false;
   
   if (!torrent) {
-    torrent = client.add(magnet, { path: downloadsPath, announce: TRACKERS });
+    torrent = client.add(magnet, {
+      path: downloadsPath,
+      announce: TRACKERS,
+      maxConns: 200,
+      uploads: 20,
+      storeCacheSlots: 100,
+    });
     isNew = true;
   } else {
     const infoHash = await ensureInfoHash(torrent);
@@ -748,7 +767,13 @@ export async function startDownload(
           resolve();
         });
       });
-      torrent = client.add(magnet, { path: downloadsPath, announce: TRACKERS });
+      torrent = client.add(magnet, {
+        path: downloadsPath,
+        announce: TRACKERS,
+        maxConns: 200,
+        uploads: 20,
+        storeCacheSlots: 100,
+      });
       isNew = true;
     }
   }
