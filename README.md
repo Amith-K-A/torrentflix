@@ -21,23 +21,24 @@
   </a>
   <img src="https://img.shields.io/badge/Next.js-16.3-black?style=for-the-badge&logo=next.js" alt="Next.js 16" />
   <img src="https://img.shields.io/badge/Electron-44-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Electron" />
+  <img src="https://img.shields.io/badge/Android_TV-React_Native-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android TV" />
   <img src="https://img.shields.io/badge/TypeScript-5.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS" />
 </p>
 
 ---
 
-## 📥 Download Desktop App for macOS
+## 📥 Downloads & Applications
 
-Enjoy the standalone native experience with persistent storage, background downloading, and zero terminal setup:
+Enjoy standalone native playback with persistent storage, background downloading, and zero external server requirements:
 
 <table>
   <thead>
     <tr>
       <th>Platform</th>
-      <th>Architecture</th>
-      <th>Installer Type</th>
-      <th>Download Link</th>
+      <th>Target / Architecture</th>
+      <th>Type</th>
+      <th>Link</th>
     </tr>
   </thead>
   <tbody>
@@ -48,6 +49,16 @@ Enjoy the standalone native experience with persistent storage, background downl
       <td>
         <a href="https://github.com/Amith-K-A/torrentflix/releases/latest/download/TorrentFlix-0.1.0-arm64.dmg">
           <strong>⬇️ Download TorrentFlix-0.1.0-arm64.dmg</strong>
+        </a>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Android TV / Google TV / Fire TV</strong></td>
+      <td>ARM / Android TV (API 26+)</td>
+      <td>React Native Leanback App</td>
+      <td>
+        <a href="android-tv-app/">
+          <strong>📺 View Android TV App & Setup</strong>
         </a>
       </td>
     </tr>

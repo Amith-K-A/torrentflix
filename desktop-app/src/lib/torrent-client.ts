@@ -49,6 +49,7 @@ export function saveDownloadsState() {
         completedAt: meta.completedAt,
         error: meta.error,
         done: meta.done ?? false,
+        paused: meta.paused ?? false,
       });
     }
     fs.writeFileSync(DOWNLOADS_STATE_FILE, JSON.stringify(serializable, null, 2));
@@ -66,13 +67,26 @@ export function loadDownloadsState() {
       if (!globalThis.__wtDownloads) globalThis.__wtDownloads = new Map();
       for (const item of data) {
         if (!globalThis.__wtDownloads.has(item.id)) {
-          globalThis.__wtDownloads.set(item.id, item);
+          globalThis.__wtDownloads.set(item.id, {
+            ...item,
+            torrentRef: null,
+          });
         }
       }
     }
   } catch (err) {
     console.error("[TorrentFlix] Failed to load downloads state:", err);
   }
+}
+
+export function getDownloadsMap(): Map<string, any> {
+  if (!globalThis.__wtDownloads) {
+    globalThis.__wtDownloads = new Map();
+    loadDownloadsState();
+  } else if (globalThis.__wtDownloads.size === 0) {
+    loadDownloadsState();
+  }
+  return globalThis.__wtDownloads;
 }
 
 type AnyTorrent = any;
@@ -100,55 +114,66 @@ export async function ensureDaemonRunning(): Promise<boolean> {
   }
 }
 
-export async function getClient(): Promise<AnyClient> {
-  if (!globalThis.__wtClient) {
-    const mod = await import("webtorrent");
-    const WebTorrent = (mod as any).default ?? mod;
-    globalThis.__wtClient = new WebTorrent({
-      maxConns: 500,
-      downloadLimit: -1,
-      uploadLimit: -1,
-      dht: { bootstrap: DHT_BOOTSTRAP_NODES },
-      natUpnp: true,
-      natPmp: true,
-      utp: true,
-      utPex: true,
-      lsd: true,
-      seedOutgoingConnections: true,
-    });
-    globalThis.__wtAccess = new Map();
-    if (!globalThis.__wtDownloads) {
-      globalThis.__wtDownloads = new Map();
-      loadDownloadsState();
-    }
-    
-    // Prevent unhandled error crashes
-    globalThis.__wtClient.on("error", (err: Error) => {
-      console.error("[TorrentFlix] WebTorrent client error:", err.message);
-    });
-  }
-  if (!globalThis.__wtCleanup) {
-    globalThis.__wtCleanup = setInterval(() => {
-      const access = globalThis.__wtAccess;
-      if (!access || !globalThis.__wtClient) return;
-      const now = Date.now();
-      for (const t of globalThis.__wtClient.torrents as AnyTorrent[]) {
-        const hasDownload = Array.from(globalThis.__wtDownloads?.keys() || []).some(k => k.startsWith(t.infoHash + ':'));
-        const isDone = t.done || (t.progress && t.progress >= 1);
-        if (hasDownload || isDone) continue; // Never evict explicit or completed downloads
+let clientPromise: Promise<AnyClient> | null = null;
 
-        const last = access.get(t.infoHash) ?? 0;
-        if (now - last > IDLE_TTL_MS) {
-          try {
-            globalThis.__wtClient.remove(t, { destroyStore: false }); // Keep cached files in Downloads/TorrentFlix
-          } catch {}
-          access.delete(t.infoHash);
-        }
+export async function getClient(): Promise<AnyClient> {
+  if (globalThis.__wtClient) return globalThis.__wtClient;
+  if (clientPromise) return clientPromise;
+
+  clientPromise = (async () => {
+    try {
+      const mod = await import("webtorrent");
+      const WebTorrent = (mod as any).default ?? mod;
+      globalThis.__wtClient = new WebTorrent({
+        maxConns: 500,
+        downloadLimit: -1,
+        uploadLimit: -1,
+        dht: { bootstrap: DHT_BOOTSTRAP_NODES },
+        natUpnp: true,
+        natPmp: true,
+        utp: true,
+        utPex: true,
+        lsd: true,
+        seedOutgoingConnections: true,
+      });
+      globalThis.__wtAccess = new Map();
+      getDownloadsMap();
+
+      // Prevent unhandled error crashes
+      globalThis.__wtClient.on("error", (err: Error) => {
+        console.error("[TorrentFlix] WebTorrent client error:", err.message);
+      });
+
+      if (!globalThis.__wtCleanup) {
+        globalThis.__wtCleanup = setInterval(() => {
+          const access = globalThis.__wtAccess;
+          if (!access || !globalThis.__wtClient) return;
+          const now = Date.now();
+          const downloads = getDownloadsMap();
+          for (const t of globalThis.__wtClient.torrents as AnyTorrent[]) {
+            const hasDownload = Array.from(downloads.keys()).some(k => k.startsWith(t.infoHash + ':'));
+            const isDone = t.done || (t.progress && t.progress >= 1);
+            if (hasDownload || isDone) continue; // Never evict explicit or completed downloads
+
+            const last = access.get(t.infoHash) ?? 0;
+            if (now - last > IDLE_TTL_MS) {
+              try {
+                globalThis.__wtClient.remove(t, { destroyStore: false }); // Keep cached files in Downloads/TorrentFlix
+              } catch {}
+              access.delete(t.infoHash);
+            }
+          }
+        }, 60_000);
+        globalThis.__wtCleanup.unref?.();
       }
-    }, 60_000);
-    globalThis.__wtCleanup.unref?.();
-  }
-  return globalThis.__wtClient;
+
+      return globalThis.__wtClient;
+    } finally {
+      clientPromise = null;
+    }
+  })();
+
+  return clientPromise;
 }
 
 function touch(infoHash: string) {
@@ -156,8 +181,9 @@ function touch(infoHash: string) {
 }
 
 function evictIfNeeded(client: AnyClient) {
+  const downloads = getDownloadsMap();
   const torrents = (client.torrents as AnyTorrent[]).filter(t => {
-    const hasDownload = Array.from(globalThis.__wtDownloads?.keys() || []).some(k => k.startsWith(t.infoHash + ':'));
+    const hasDownload = Array.from(downloads.keys()).some(k => k.startsWith(t.infoHash + ':'));
     const isDone = t.done || (t.progress && t.progress >= 1);
     return !hasDownload && !isDone;
   });
@@ -486,11 +512,11 @@ export async function startTorrent(magnet: string, opts: StartOptions = {}): Pro
 }
 
 export function registerCompletedStreamDownload(torrent: AnyTorrent, fileIdx?: number, targetFile?: any) {
-  if (!globalThis.__wtDownloads) globalThis.__wtDownloads = new Map();
+  const downloads = getDownloadsMap();
   const idx = fileIdx !== undefined ? fileIdx : (torrent._streamMeta?.fileIdx ?? 0);
   const downloadId = `${torrent.infoHash}:${idx}`;
 
-  const existing = globalThis.__wtDownloads.get(downloadId);
+  const existing = downloads.get(downloadId);
   if (existing && existing.done) return;
 
   const file = targetFile || (torrent.files ? torrent.files[idx] : null);
@@ -517,7 +543,7 @@ export function registerCompletedStreamDownload(torrent: AnyTorrent, fileIdx?: n
     done: true,
   };
 
-  globalThis.__wtDownloads.set(downloadId, downloadMeta);
+  downloads.set(downloadId, downloadMeta);
   saveDownloadsState();
 }
 
@@ -701,26 +727,20 @@ export async function cancelDownload(downloadId: string) {
 }
 
 export async function clearAllDownloads() {
-  const downloads = globalThis.__wtDownloads;
-  if (!downloads) return;
-  for (const downloadId of downloads.keys()) {
+  const downloads = getDownloadsMap();
+  for (const downloadId of Array.from(downloads.keys())) {
     await removeDownload(downloadId, true);
   }
 }
 
 export async function clearAllErrors() {
-  const downloads = globalThis.__wtDownloads;
-  if (!downloads) return;
-  const client = globalThis.__wtClient;
-  if (!client) return;
-  
-  for (const [downloadId, meta] of downloads.entries()) {
-    const infoHash = downloadId.split(':')[0];
-    const torrent = await client.get(infoHash);
-    if (!torrent || (torrent as any)._destroying || (torrent as any).destroyed) {
-       downloads.delete(downloadId);
+  const downloads = getDownloadsMap();
+  for (const [downloadId, meta] of Array.from(downloads.entries())) {
+    if (meta.error) {
+      downloads.delete(downloadId);
     }
   }
+  saveDownloadsState();
 }
 
 async function ensureInfoHash(torrent: any): Promise<string> {
@@ -799,7 +819,7 @@ export async function startDownload(
   }
 
   const downloadId = `${infoHash}:${fileIdx !== undefined ? fileIdx : 'all'}`;
-  if (!globalThis.__wtDownloads) globalThis.__wtDownloads = new Map();
+  const downloads = getDownloadsMap();
   
   const downloadMeta: any = {
     magnet,
@@ -817,7 +837,7 @@ export async function startDownload(
     error: null,
   };
   
-  globalThis.__wtDownloads.set(downloadId, downloadMeta);
+  downloads.set(downloadId, downloadMeta);
   saveDownloadsState();
 
   // Listen for errors on this torrent — store the error instead of losing the torrent
@@ -852,25 +872,107 @@ export async function startDownload(
   return { infoHash, downloadId };
 }
 
+const resumingTorrents = new Set<string>();
+
+export async function resumeActiveDownload(meta: any) {
+  if (!meta || !meta.magnet || meta.done) return null;
+  const infoHash = (meta.id || "").split(':')[0];
+  if (!infoHash) return null;
+
+  if (resumingTorrents.has(infoHash)) {
+    const c = globalThis.__wtClient;
+    return c ? await c.get(infoHash) : null;
+  }
+
+  resumingTorrents.add(infoHash);
+  try {
+    const client = await getClient();
+    let torrent: any = await client.get(infoHash);
+    if (!torrent) {
+      const downloadsPath = getDownloadsPath();
+      torrent = client.add(meta.magnet, {
+        path: downloadsPath,
+        announce: TRACKERS,
+        maxConns: 200,
+        uploads: 20,
+        storeCacheSlots: 100,
+      });
+
+      meta.torrentRef = torrent;
+
+      const fileIdx = meta.fileIdx;
+      if (fileIdx !== undefined) {
+        const applyFileSelection = () => {
+          torrent.files.forEach((f: any) => {
+            try { f.deselect(); } catch {}
+          });
+          if (torrent.files[fileIdx]) {
+            try { torrent.files[fileIdx].select(); } catch {}
+          }
+        };
+        if (torrent.ready) {
+          applyFileSelection();
+        } else {
+          torrent.once("ready", applyFileSelection);
+        }
+      }
+
+      torrent.on("error", (err: Error) => {
+        console.error(`[TorrentFlix] Download error for "${meta.title}":`, err.message);
+        meta.error = err.message;
+      });
+
+      torrent.on("done", () => {
+        console.log(`[TorrentFlix] Download complete: "${meta.title}". Will free RAM in ${DONE_CLEANUP_DELAY_MS / 1000}s.`);
+        meta.done = true;
+        meta.completedAt = Date.now();
+        meta.error = null;
+        saveDownloadsState();
+        setTimeout(async () => {
+          try {
+            const c = globalThis.__wtClient;
+            if (c) {
+              const liveT = await c.get(infoHash);
+              if (liveT) {
+                c.remove(infoHash, { destroyStore: false });
+                console.log(`[TorrentFlix] Freed RAM for completed download: "${meta.title}"`);
+              }
+            }
+            meta.torrentRef = null;
+          } catch (e: any) {
+            console.error(`[TorrentFlix] Failed to cleanup completed download:`, e?.message);
+          }
+        }, DONE_CLEANUP_DELAY_MS);
+      });
+
+      if (meta.paused) {
+        torrent.pause();
+      }
+    } else {
+      meta.torrentRef = torrent;
+    }
+    return torrent;
+  } catch (err: any) {
+    console.error(`[TorrentFlix] Failed to resume download "${meta.title}":`, err?.message);
+    meta.error = err?.message;
+    return null;
+  } finally {
+    resumingTorrents.delete(infoHash);
+  }
+}
+
 export async function getAllDownloadsStats() {
-  const client = globalThis.__wtClient;
-  const downloads = globalThis.__wtDownloads;
-  if (!client || !downloads) return [];
+  const downloads = getDownloadsMap();
+  if (!downloads || downloads.size === 0) return [];
 
   const results = [];
   for (const [downloadId, meta] of downloads.entries()) {
     const infoHash = downloadId.split(':')[0];
     const fileIdxStr = downloadId.split(':')[1];
     const fileIdx = (fileIdxStr !== 'undefined' && fileIdxStr !== 'all') ? parseInt(fileIdxStr, 10) : undefined;
-    
-    // Try client.get() first, fall back to the stored reference
-    let torrent = await client.get(infoHash);
-    if (!torrent && meta.torrentRef) {
-      torrent = meta.torrentRef;
-    }
 
-    // Completed download whose torrent was freed from RAM — show as complete from metadata
-    if (!torrent && meta.completedAt) {
+    // 1. Completed download whose torrent was freed from RAM or marked done
+    if (meta.done || meta.completedAt) {
       results.push({
         id: downloadId,
         infoHash,
@@ -899,32 +1001,61 @@ export async function getAllDownloadsStats() {
       continue;
     }
 
-    // If torrent is completely gone (destroyed + no ref), or has a stored error, mark as error
-    if (!torrent || (torrent.destroyed && !torrent.done)) {
+    // 2. Active or in-progress download: ensure WebTorrent client has it running
+    let torrent: any = null;
+    const client = globalThis.__wtClient;
+    if (client) {
+      torrent = await client.get(infoHash);
+      if (!torrent && meta.torrentRef && !meta.torrentRef.destroyed) {
+        torrent = meta.torrentRef;
+      }
+    }
+
+    if (!torrent && !meta.error) {
+      torrent = await resumeActiveDownload(meta);
+    }
+
+    // 3. Stored error or torrent destroyed while incomplete
+    if (meta.error || (torrent && torrent.destroyed && !torrent.done)) {
       results.push({
         id: downloadId,
         infoHash,
         magnet: meta.magnet || `magnet:?xt=urn:btih:${infoHash}`,
         title: meta.title,
         posterPath: meta.posterPath,
-        progress: 0,
+        progress: torrent?.progress ?? 0,
         status: 'error',
         errorMessage: meta.error || 'Torrent was destroyed',
       });
       continue;
     }
 
-    // If it has an error stored but torrent is still alive, show it as error too
-    if (meta.error && !torrent.done) {
+    // 4. Waiting for metadata / connecting
+    if (!torrent) {
       results.push({
         id: downloadId,
         infoHash,
         magnet: meta.magnet || `magnet:?xt=urn:btih:${infoHash}`,
         title: meta.title,
         posterPath: meta.posterPath,
-        progress: torrent.progress ?? 0,
-        status: 'error',
-        errorMessage: meta.error,
+        name: meta.torrentName || meta.title,
+        progress: 0,
+        peers: 0,
+        downloadSpeed: 0,
+        uploadSpeed: 0,
+        downloaded: 0,
+        length: meta.fileLength || 0,
+        timeRemaining: 0,
+        ready: false,
+        done: false,
+        paused: Boolean(meta.paused),
+        fileIdx: meta.fileIdx ?? 0,
+        type: meta.type,
+        tmdbId: meta.tmdbId,
+        imdbId: meta.imdbId,
+        season: meta.season,
+        episode: meta.episode,
+        episodeName: meta.episodeName,
       });
       continue;
     }
@@ -932,7 +1063,7 @@ export async function getAllDownloadsStats() {
     let downloaded = torrent.downloaded ?? 0;
     let length = torrent.length ?? 0;
     let progress = torrent.progress ?? 0;
-    let done = torrent.done;
+    let done = Boolean(torrent.done || progress >= 1);
     const ready = torrent.ready;
 
     const file = fileIdx !== undefined && torrent.files ? torrent.files[fileIdx] : undefined;
@@ -950,6 +1081,12 @@ export async function getAllDownloadsStats() {
       meta.fileLength = length;
     }
 
+    if (done && !meta.done) {
+      meta.done = true;
+      meta.completedAt = Date.now();
+      saveDownloadsState();
+    }
+
     results.push({
       id: downloadId,
       infoHash: torrent.infoHash,
@@ -962,11 +1099,11 @@ export async function getAllDownloadsStats() {
       downloadSpeed: torrent.downloadSpeed ?? 0,
       uploadSpeed: torrent.uploadSpeed ?? 0,
       downloaded,
-      length,
+      length: length || meta.fileLength || 0,
       timeRemaining: torrent.timeRemaining ?? 0,
       ready,
       done,
-      paused: torrent.paused,
+      paused: Boolean(torrent.paused || meta.paused),
       fileIdx: meta.fileIdx ?? 0,
       type: meta.type,
       tmdbId: meta.tmdbId,
@@ -985,6 +1122,12 @@ export async function getAllDownloadsStats() {
 }
 
 export async function pauseDownload(downloadId: string) {
+  const downloads = getDownloadsMap();
+  const meta = downloads.get(downloadId);
+  if (meta) {
+    meta.paused = true;
+    saveDownloadsState();
+  }
   const client = globalThis.__wtClient;
   if (!client) return;
   const infoHash = downloadId.split(':')[0];
@@ -993,15 +1136,29 @@ export async function pauseDownload(downloadId: string) {
 }
 
 export async function resumeDownload(downloadId: string) {
+  const downloads = getDownloadsMap();
+  const meta = downloads.get(downloadId);
+  if (meta) {
+    meta.paused = false;
+    meta.error = null;
+    saveDownloadsState();
+  }
   const client = globalThis.__wtClient;
-  if (!client) return;
-  const infoHash = downloadId.split(':')[0];
-  const torrent = await client.get(infoHash);
-  if (torrent) torrent.resume();
+  if (client) {
+    const infoHash = downloadId.split(':')[0];
+    const torrent = await client.get(infoHash);
+    if (torrent) {
+      torrent.resume();
+      return;
+    }
+  }
+  if (meta) {
+    await resumeActiveDownload(meta);
+  }
 }
 
 export async function removeDownload(downloadId: string, deleteFiles: boolean = false) {
-  const downloads = globalThis.__wtDownloads;
+  const downloads = getDownloadsMap();
   if (!downloads) return;
   
   const meta = downloads.get(downloadId);
@@ -1023,11 +1180,22 @@ export async function removeDownload(downloadId: string, deleteFiles: boolean = 
         });
       }
     }
+    // If torrent was already freed from RAM, ensure files on disk are removed if requested
+    if (deleteFiles && meta.torrentName) {
+      try {
+        const filePath = path.join(getDownloadsPath(), meta.torrentName);
+        if (fs.existsSync(filePath)) {
+          fs.rmSync(filePath, { recursive: true, force: true });
+        }
+      } catch (err) {
+        console.error(`[TorrentFlix] Failed to delete file on disk:`, err);
+      }
+    }
   }
 }
 
 export async function retryDownload(downloadId: string) {
-  const downloads = globalThis.__wtDownloads;
+  const downloads = getDownloadsMap();
   if (!downloads) throw new Error("No downloads tracked");
 
   const meta = downloads.get(downloadId);

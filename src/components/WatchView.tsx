@@ -343,7 +343,7 @@ export default function WatchView({ details }: { details: MediaDetails }) {
   useEffect(() => {
     let mounted = true;
     const fetchDownloads = () => {
-      fetch("/api/downloads")
+      fetch("/api/downloads", { cache: "no-store" })
         .then((r) => r.json())
         .then((data) => {
           if (mounted) setActiveDownloads(data);

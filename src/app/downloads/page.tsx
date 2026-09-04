@@ -53,9 +53,25 @@ function formatTime(ms: number) {
   return `${seconds}s`;
 }
 
+const DOWNLOADS_CACHE_KEY = "tf:downloads_cache";
+
 export default function DownloadsPage() {
   const [downloads, setDownloads] = useState<DownloadStatus[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Hydrate from localStorage on client-side mount without SSR mismatch
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(DOWNLOADS_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setDownloads(parsed);
+          setLoading(false);
+        }
+      }
+    } catch {}
+  }, []);
   const [confirmCancel, setConfirmCancel] = useState<{
     id: string;
     title: string;
@@ -87,15 +103,21 @@ export default function DownloadsPage() {
   const handleAction = async (action: string, id: string) => {
     // Optimistic update
     if (action === "cancel") {
-      setDownloads((prev) => prev.filter((d) => d.id !== id));
+      setDownloads((prev) => {
+        const next = prev.filter((d) => d.id !== id);
+        try { localStorage.setItem(DOWNLOADS_CACHE_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
     } else if (action === "pause" || action === "resume") {
-      setDownloads((prev) =>
-        prev.map((d) =>
+      setDownloads((prev) => {
+        const next = prev.map((d) =>
           d.id === id
             ? { ...d, paused: action === "pause" }
             : d
-        )
-      );
+        );
+        try { localStorage.setItem(DOWNLOADS_CACHE_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
     }
 
     try {
@@ -112,8 +134,13 @@ export default function DownloadsPage() {
   const handleGlobalAction = async (action: "clear_all" | "clear_errors") => {
     if (action === "clear_all") {
       setDownloads([]);
+      try { localStorage.removeItem(DOWNLOADS_CACHE_KEY); } catch {}
     } else if (action === "clear_errors") {
-      setDownloads((prev) => prev.filter((d) => d.status !== "error"));
+      setDownloads((prev) => {
+        const next = prev.filter((d) => d.status !== "error");
+        try { localStorage.setItem(DOWNLOADS_CACHE_KEY, JSON.stringify(next)); } catch {}
+        return next;
+      });
     }
 
     try {
@@ -131,10 +158,15 @@ export default function DownloadsPage() {
     let mounted = true;
     const fetchDownloads = async () => {
       try {
-        const res = await fetch("/api/downloads");
+        const res = await fetch("/api/downloads", { cache: "no-store" });
         if (res.ok) {
           const data = await res.json();
-          if (mounted) setDownloads(data);
+          if (mounted) {
+            setDownloads(data);
+            try {
+              localStorage.setItem(DOWNLOADS_CACHE_KEY, JSON.stringify(data));
+            } catch {}
+          }
         }
       } catch (err) {
         console.error("Failed to fetch downloads", err);
