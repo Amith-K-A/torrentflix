@@ -33,6 +33,7 @@ import {
   qualityRank,
   parseSubtitles,
 } from "@/lib/utils";
+import { pickBestSubtitle } from "@/lib/subtitles";
 import { getProgress, progressKey, saveProgress } from "@/lib/store";
 import type { PlayTarget, TorrentResult } from "@/lib/types";
 
@@ -89,7 +90,6 @@ export default function PlayerOverlay({
   const [subtitleLabel, setSubtitleLabel] = useState<string | null>(null);
   const [subtitlesLoading, setSubtitlesLoading] = useState(false);
   const [showAudioWarning, setShowAudioWarning] = useState(false);
-  const [subtitleOffset, setSubtitleOffset] = useState<number>(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -98,31 +98,6 @@ export default function PlayerOverlay({
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMessage(null), 1800);
   }, []);
-
-  const applySubtitleOffset = useCallback((delta: number) => {
-    setSubtitleOffset((prev) => {
-      const next = Math.round((prev + delta) * 10) / 10;
-      const v = videoRef.current;
-      if (v && v.textTracks && v.textTracks.length > 0) {
-        for (let i = 0; i < v.textTracks.length; i++) {
-          const track = v.textTracks[i];
-          if (track.cues) {
-            for (let j = 0; j < track.cues.length; j++) {
-              const cue = track.cues[j] as VTTCue;
-              cue.startTime += delta;
-              cue.endTime += delta;
-            }
-          }
-        }
-      }
-      showToast(`Subtitle Sync: ${next > 0 ? `+${next.toFixed(1)}` : next.toFixed(1)}s`);
-      return next;
-    });
-  }, [showToast]);
-
-  const resetSubtitleOffset = useCallback(() => {
-    applySubtitleOffset(-subtitleOffset);
-  }, [subtitleOffset, applySubtitleOffset]);
 
   const bufferTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -158,68 +133,85 @@ export default function PlayerOverlay({
     setBufferedAhead(ahead);
   }, []);
 
-  const loadSubtitles = useCallback(async (auto: boolean = false) => {
-    if (!target.imdbId) return;
-    setSubtitlesLoading(true);
-    try {
-      const cacheKey = `/subtitles/${target.imdbId}/${target.season ?? 0}/${target.episode ?? 0}.vtt`;
-      const cache = await caches.open("subtitles-v4");
-      
-      let res = await cache.match(cacheKey);
-      let vtt = "";
-      
-      if (res) {
-        vtt = await res.text();
-      } else {
-        const url = target.type === "movie" 
-          ? `https://opensubtitles-v3.strem.io/subtitles/movie/${target.imdbId}.json`
-          : `https://opensubtitles-v3.strem.io/subtitles/series/${target.imdbId}:${target.season}:${target.episode}.json`;
-        
+  const loadSubtitles = useCallback(
+    async (
+      auto: boolean = false,
+      sourceOverride?: TorrentResult,
+      startedOverride?: Started
+    ) => {
+      if (!target.imdbId) return;
+      setSubtitlesLoading(true);
+      try {
+        const activeSource = sourceOverride || selected || preselectedSource;
+        const activeStarted = startedOverride || started;
+        const releaseName = activeSource?.name || target.title;
+        const fileName = activeStarted?.fileName || "";
+
+        const cache = await caches.open("subtitles-v5");
+        const url =
+          target.type === "movie"
+            ? `https://opensubtitles-v3.strem.io/subtitles/movie/${target.imdbId}.json`
+            : `https://opensubtitles-v3.strem.io/subtitles/series/${target.imdbId}:${target.season}:${target.episode}.json`;
+
         const apiRes = await fetch(url);
         const data = await apiRes.json();
-        
-        const eng = data.subtitles?.filter((s: any) => s.lang === "eng" || s.lang === "en");
-        if (!eng || eng.length === 0) {
-          if (!auto) alert("No English subtitles found.");
+
+        const best = pickBestSubtitle(data.subtitles || [], releaseName, fileName);
+        if (!best) {
+          if (!auto) showToast("No matching English subtitles found");
           setSubtitlesLoading(false);
           return;
         }
-        
-        const subRes = await fetch(eng[0].url);
-        const text = await subRes.text();
-        const isSrt = !eng[0].url.includes(".vtt");
-        vtt = parseSubtitles(text, isSrt);
-        
-        await cache.put(cacheKey, new Response(vtt, { headers: { "Content-Type": "text/vtt" } }));
+
+        const cacheKey = `/subtitles-v5/${target.imdbId}/${target.season ?? 0}/${target.episode ?? 0}/${best.id}.vtt`;
+        let res = await cache.match(cacheKey);
+        let vtt = "";
+
+        if (res) {
+          vtt = await res.text();
+        } else {
+          const subRes = await fetch(best.url);
+          const text = await subRes.text();
+          const isSrt = !best.url.includes(".vtt");
+          vtt = parseSubtitles(text, isSrt);
+          await cache.put(
+            cacheKey,
+            new Response(vtt, { headers: { "Content-Type": "text/vtt" } })
+          );
+        }
+
+        const blob = new Blob([vtt], { type: "text/vtt" });
+        setSubtitleUrl(URL.createObjectURL(blob));
+        const groupLabel = best.releaseGroup ? `English · ${best.releaseGroup}` : "English (Auto-Sync)";
+        setSubtitleLabel(groupLabel);
+        showToast("Subtitles auto-synced");
+        if (!auto) localStorage.setItem("tf-subtitles", "true");
+      } catch (e) {
+        console.error("Failed to load subtitles", e);
+      } finally {
+        setSubtitlesLoading(false);
       }
-      
-      const blob = new Blob([vtt], { type: "text/vtt" });
-      setSubtitleUrl(URL.createObjectURL(blob));
-      setSubtitleLabel("English");
-      if (!auto) localStorage.setItem("tf-subtitles", "true");
-    } catch (e) {
-      console.error("Failed to load subtitles", e);
-    } finally {
-      setSubtitlesLoading(false);
-    }
-  }, [target]);
+    },
+    [target, selected, preselectedSource, started, showToast]
+  );
 
   const toggleSubtitles = useCallback(() => {
     if (subtitleUrl) {
       setSubtitleUrl(null);
       setSubtitleLabel(null);
       localStorage.setItem("tf-subtitles", "false");
+      showToast("Subtitles off");
     } else {
-      loadSubtitles();
+      loadSubtitles(false);
     }
-  }, [subtitleUrl, loadSubtitles]);
+  }, [subtitleUrl, loadSubtitles, showToast]);
 
-  // Auto-load subtitles if previously enabled
+  // Auto-load and auto-sync subtitles when source is selected or playback begins
   useEffect(() => {
-    if (localStorage.getItem("tf-subtitles") === "true") {
-      loadSubtitles(true);
+    if (localStorage.getItem("tf-subtitles") === "true" && (selected || started)) {
+      loadSubtitles(true, selected ?? undefined, started ?? undefined);
     }
-  }, [loadSubtitles]);
+  }, [selected, started, loadSubtitles]);
 
   // autoplay was blocked by the browser and needs a real click to start
   const [needsTap, setNeedsTap] = useState(false);
@@ -470,12 +462,6 @@ export default function PlayerOverlay({
         setMuted(v.muted);
       } else if (e.key.toLowerCase() === "f") {
         toggleFullscreen();
-      } else if ((e.key === "[" || e.key === "{") && subtitleUrl) {
-        applySubtitleOffset(-0.5);
-      } else if ((e.key === "]" || e.key === "}") && subtitleUrl) {
-        applySubtitleOffset(0.5);
-      } else if (e.key === "0" && subtitleUrl && subtitleOffset !== 0) {
-        resetSubtitleOffset();
       }
       nudgeControls();
     };
@@ -483,7 +469,7 @@ export default function PlayerOverlay({
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, [close, nudgeControls, pickerOpen, subtitleUrl, subtitleOffset, applySubtitleOffset, resetSubtitleOffset]);
+  }, [close, nudgeControls, pickerOpen]);
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -717,13 +703,6 @@ export default function PlayerOverlay({
                 const tr = e.currentTarget as HTMLTrackElement;
                 if (tr.track) {
                   tr.track.mode = "showing";
-                  if (subtitleOffset !== 0 && tr.track.cues) {
-                    for (let j = 0; j < tr.track.cues.length; j++) {
-                      const cue = tr.track.cues[j] as VTTCue;
-                      cue.startTime += subtitleOffset;
-                      cue.endTime += subtitleOffset;
-                    }
-                  }
                 }
               }}
             />
@@ -1120,44 +1099,16 @@ export default function PlayerOverlay({
           <div className="ml-auto flex items-center gap-3 md:ml-0">
             <button
               onClick={toggleSubtitles}
-              title={subtitleUrl ? "Disable Subtitles" : "Search & Load Subtitles"}
-              className={cn("hover:text-brand transition cursor-pointer", subtitleUrl ? "text-brand" : "", subtitlesLoading && "animate-pulse")}
+              title={subtitleUrl ? `Subtitles: ${subtitleLabel ?? "On"} (Click to disable)` : "Enable Subtitles (Auto-Sync)"}
+              className={cn("hover:text-brand transition cursor-pointer flex items-center gap-1.5", subtitleUrl ? "text-brand" : "", subtitlesLoading && "animate-pulse")}
             >
               <Subtitles size={22} />
+              {subtitleLabel && subtitleUrl && (
+                <span className="hidden sm:inline-block max-w-[140px] truncate text-[11px] font-medium opacity-80" title={subtitleLabel}>
+                  {subtitleLabel}
+                </span>
+              )}
             </button>
-            {subtitleUrl && (
-              <div className="flex items-center rounded-lg border border-white/20 bg-black/40 px-2 py-0.5 text-xs text-white/90 gap-1.5 shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => applySubtitleOffset(-0.5)}
-                  className="px-1 text-white/60 hover:text-brand font-mono font-semibold transition active:scale-95 cursor-pointer"
-                  title="Shift subtitles earlier -0.5s (Hotkey: [ )"
-                >
-                  -0.5s
-                </button>
-                <button
-                  type="button"
-                  onClick={resetSubtitleOffset}
-                  className="font-mono font-bold text-white hover:text-brand px-1 transition cursor-pointer"
-                  title="Click to reset sync to 0.0s (Hotkey: 0)"
-                >
-                  {subtitleOffset > 0 ? `+${subtitleOffset.toFixed(1)}` : subtitleOffset.toFixed(1)}s
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applySubtitleOffset(0.5)}
-                  className="px-1 text-white/60 hover:text-brand font-mono font-semibold transition active:scale-95 cursor-pointer"
-                  title="Shift subtitles later +0.5s (Hotkey: ] )"
-                >
-                  +0.5s
-                </button>
-              </div>
-            )}
-            {subtitleLabel && !subtitleUrl && (
-              <span className="max-w-[120px] truncate text-xs text-muted" title={subtitleLabel}>
-                {subtitleLabel}
-              </span>
-            )}
             <button
               onClick={() => setPickerOpen(true)}
               className="rounded border border-white/30 px-2.5 py-1 text-xs font-semibold hover:border-brand hover:text-brand"

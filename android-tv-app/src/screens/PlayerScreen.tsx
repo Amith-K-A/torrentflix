@@ -14,7 +14,6 @@ import {
   Pause,
   Play,
   RotateCcw,
-  Subtitles,
   Users,
 } from "lucide-react-native";
 import { DeviceProfiler } from "../services/DeviceProfiler";
@@ -48,7 +47,6 @@ export const PlayerScreen: React.FC<Props> = ({ target, source, onExit }) => {
     uploadSpeed: 0,
     bufferAheadSeconds: 0,
   });
-  const [subtitleOffset, setSubtitleOffset] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -104,11 +102,6 @@ export const PlayerScreen: React.FC<Props> = ({ target, source, onExit }) => {
     showToast(`${deltaSeconds > 0 ? "+" : ""}${deltaSeconds}s`);
   };
 
-  const handleSubtitleSync = (delta: number) => {
-    const next = Math.round((subtitleOffset + delta) * 10) / 10;
-    setSubtitleOffset(next);
-    showToast(`Subtitle Offset: ${next > 0 ? `+${next}` : next}s`);
-  };
 
   const formatSeconds = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -283,28 +276,6 @@ export const PlayerScreen: React.FC<Props> = ({ target, source, onExit }) => {
                 style={styles.remoteKey}
               >
                 <Text style={styles.keyText}>10s ▶</Text>
-              </TouchableHighlight>
-
-              <TouchableHighlight
-                onPress={() => handleSubtitleSync(-0.5)}
-                underlayColor="#222"
-                style={styles.remoteKey}
-              >
-                <View style={styles.keyRow}>
-                  <Subtitles size={12} color="#fff" />
-                  <Text style={styles.keyText}>Sub -0.5s</Text>
-                </View>
-              </TouchableHighlight>
-
-              <TouchableHighlight
-                onPress={() => handleSubtitleSync(0.5)}
-                underlayColor="#222"
-                style={styles.remoteKey}
-              >
-                <View style={styles.keyRow}>
-                  <Subtitles size={12} color="#fff" />
-                  <Text style={styles.keyText}>Sub +0.5s</Text>
-                </View>
               </TouchableHighlight>
             </View>
           </View>
