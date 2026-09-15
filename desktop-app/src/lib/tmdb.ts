@@ -1,34 +1,49 @@
 import axios from "axios";
 import type { EpisodeItem, MediaItem, MediaType } from "./types";
 
+const DEFAULT_TMDB_API_KEY = "3abea6c0bb2e0cd1800d028f0b96b8b4";
+
+export function getTmdbApiKey(): string {
+  return process.env.TMDB_API_KEY || DEFAULT_TMDB_API_KEY;
+}
+
 export function tmdbConfigured(): boolean {
-  return Boolean(process.env.TMDB_API_KEY || process.env.TMDB_ACCESS_TOKEN);
+  return Boolean(getTmdbApiKey() || process.env.TMDB_ACCESS_TOKEN);
 }
 
 export async function tmdb<T = any>(
   path: string,
   params: Record<string, string | number | boolean> = {}
 ): Promise<T> {
-  if (!tmdbConfigured()) {
+  const apiKey = getTmdbApiKey();
+  const useToken = Boolean(process.env.TMDB_ACCESS_TOKEN);
+
+  if (!apiKey && !useToken) {
     throw new Error(
       "TMDB API key not configured. Add TMDB_API_KEY to .env.local (free at themoviedb.org)."
     );
   }
-  const useToken = Boolean(process.env.TMDB_ACCESS_TOKEN);
 
   // TMDB occasionally 5xx's under burst load from the home page rows — retry.
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      const headers: Record<string, string> = {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept: "application/json",
+      };
+      if (useToken) {
+        headers["Authorization"] = `Bearer ${process.env.TMDB_ACCESS_TOKEN}`;
+      }
+
       const res = await axios.get<T>(`https://api.themoviedb.org/3${path}`, {
         params: {
           ...params,
-          ...(useToken ? {} : { api_key: process.env.TMDB_API_KEY }),
+          ...(useToken ? {} : { api_key: apiKey }),
         },
-        headers: useToken
-          ? { Authorization: `Bearer ${process.env.TMDB_ACCESS_TOKEN}` }
-          : undefined,
-        timeout: 8000,
+        headers,
+        timeout: 10000,
       });
       return res.data;
     } catch (e) {

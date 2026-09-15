@@ -1,8 +1,35 @@
 const { app, BrowserWindow, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const { fork, spawn } = require("child_process");
 
 const net = require("net");
+
+function getLocalEnv() {
+  const possiblePaths = [
+    path.join(__dirname, ".env.local"),
+    path.join(__dirname, ".next", "standalone", "desktop-app", ".env.local"),
+    path.join(app.getPath("userData"), ".env.local"),
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const content = fs.readFileSync(p, "utf-8");
+        const parsed = {};
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const idx = trimmed.indexOf("=");
+          if (idx > 0) {
+            parsed[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+          }
+        }
+        return parsed;
+      } catch {}
+    }
+  }
+  return {};
+}
 
 let mainWindow;
 let serverProcess;
@@ -54,10 +81,15 @@ async function createWindow() {
   // Path to the standalone server
   const serverPath = path.join(__dirname, ".next", "standalone", "desktop-app", "server.js");
   
+  const localEnv = getLocalEnv();
+  const tmdbKey = process.env.TMDB_API_KEY || localEnv.TMDB_API_KEY || "3abea6c0bb2e0cd1800d028f0b96b8b4";
+
   // Start the Next.js standalone server using Electron's bundled Node
   serverProcess = fork(serverPath, [], {
     env: { 
       ...process.env, 
+      ...localEnv,
+      TMDB_API_KEY: tmdbKey,
       PORT: port,
       ELECTRON_RUN_AS_NODE: '1'
     },
