@@ -70,13 +70,23 @@ Enjoy standalone native playback with persistent storage, background downloading
 ### 🛠️ macOS Installation Guide
 
 1. Download the latest [**TorrentFlix-0.1.0-arm64.dmg**](https://github.com/Amith-K-A/torrentflix/releases/latest/download/TorrentFlix-0.1.0-arm64.dmg).
-2. Double-click the `.dmg` file and drag **TorrentFlix.app** into your **Applications** folder.
-3. **If macOS Gatekeeper flags the app as unsigned or unverified:**
-   Run this single command in your macOS Terminal:
+
+2. **If macOS displays *"Apple could not verify ... is free of malware"* when opening the DMG:**  
+   Because TorrentFlix is open-source and not signed with a paid Apple Developer certificate, macOS Gatekeeper blocks internet downloads by default. Open your **Terminal** and run:
+   ```bash
+   xattr -d com.apple.quarantine ~/Downloads/TorrentFlix*.dmg
+   ```
+   *(Alternatively: Go to **System Settings > Privacy & Security**, scroll down to **Security**, and click **Open Anyway**).*
+
+3. Double-click the `.dmg` and drag **TorrentFlix.app** into your **Applications** folder.
+
+4. **If the app is blocked on first launch from Applications:**  
+   Run this command in Terminal:
    ```bash
    xattr -cr /Applications/TorrentFlix.app
    ```
-4. Launch **TorrentFlix** from your Applications or Spotlight search.
+
+5. Launch **TorrentFlix** and enjoy!
 
 ---
 

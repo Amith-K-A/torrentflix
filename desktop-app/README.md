@@ -55,12 +55,22 @@
 ### 🛠️ Installation & Gatekeeper Fix
 
 1. Download [**TorrentFlix-0.1.0-arm64.dmg**](https://github.com/Amith-K-A/torrentflix/releases/latest/download/TorrentFlix-0.1.0-arm64.dmg).
-2. Open the `.dmg` and drag **TorrentFlix.app** into `/Applications`.
-3. If macOS displays *"Apple cannot verify the developer"* or *"App is damaged"*:
+
+2. **If macOS displays *"Apple could not verify ... is free of malware"* when opening the DMG:**  
+   Because TorrentFlix is open-source and not signed with a paid Apple Developer certificate, run this in your **Terminal**:
+   ```bash
+   xattr -d com.apple.quarantine ~/Downloads/TorrentFlix*.dmg
+   ```
+   *(Or go to **System Settings > Privacy & Security** and click **Open Anyway**).*
+
+3. Double-click the `.dmg` and drag **TorrentFlix.app** into `/Applications`.
+
+4. **If the app is blocked on first launch from Applications:**
    ```bash
    xattr -cr /Applications/TorrentFlix.app
    ```
-4. Open **TorrentFlix** and enjoy!
+
+5. Open **TorrentFlix** and enjoy!
 
 ---
 

@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "electron": "electron .",
-    "desktop:build": "next build && cp -r public .next/standalone/desktop-app/ && cp -r .next/static .next/standalone/desktop-app/.next/ && (cp .env.local .next/standalone/desktop-app/ 2>/dev/null || true) && electron-builder"
+    "desktop:build": "next build && cp -r public .next/standalone/desktop-app/ && cp -r .next/static .next/standalone/desktop-app/.next/ && (cp .env.local .next/standalone/desktop-app/ 2>/dev/null || true) && electron-builder && codesign --force -s - dist-desktop/*.dmg"
   },
   "build": {
     "appId": "com.torrentflix.desktop",
@@ -27,7 +27,13 @@
     ],
     "mac": {
       "target": "dmg",
-      "icon": "build/icon.icns"
+      "icon": "build/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "sign": false
     }
   },
   "dependencies": {
